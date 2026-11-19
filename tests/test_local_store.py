@@ -37,7 +37,7 @@ def test_subtask_and_list_tasks(tmp_path) -> None:
   store = LocalTaskStore(tmp_path)
   parent = store.create_task("P", project_gid="p1")
   child = store.create_subtask(parent, "C", project_gid="p1")
-  store.create_task("Other project", project_gid="p2")
+  other = store.create_task("Other project", project_gid="p2")
 
   child_task = store.get_task(child)
   assert child_task["parent"]["gid"] == parent
@@ -46,7 +46,7 @@ def test_subtask_and_list_tasks(tmp_path) -> None:
   ids = [item["gid"] for item in listed]
   assert parent in ids
   assert child not in ids
-  assert all(item.get("project") == "p1" or item.get("gid") for item in listed)
+  assert other not in ids
 
   numeric = [int(item["gid"]) for item in listed]
   assert numeric == sorted(numeric)

@@ -303,7 +303,9 @@ class LocalTaskStore:
         self._write_json(path, data)
 
     def _write_json(self, path: Path, data: Any) -> None:
-        content = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
+        self._write_text_atomic(path, json.dumps(data, ensure_ascii=False, indent=2) + "\n")
+
+    def _write_text_atomic(self, path: Path, content: str) -> None:
         fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
         try:
             os.write(fd, content.encode("utf-8"))
@@ -351,7 +353,7 @@ class LocalTaskStore:
         raw = self._counter_path.read_text(encoding="utf-8").strip() if self._counter_path.exists() else "0"
         current = int(raw or "0")
         nxt = current + 1
-        self._counter_path.write_text(f"{nxt}\n", encoding="utf-8")
+        self._write_text_atomic(self._counter_path, f"{nxt}\n")
         return str(nxt)
 
     @contextmanager
