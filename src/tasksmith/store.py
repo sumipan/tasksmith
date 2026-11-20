@@ -23,8 +23,9 @@ class TaskStore(Protocol):
     - ``name`` (``str``)
     - ``completed`` (``bool``)
     - ``due_on`` (``str | None``)
-    - ``body`` (``str``; empty string when unset). Implementations may map
-      from storage-specific formats; the protocol does not define that mapping.
+    - ``body`` (``str``; empty string when unset). Plain text whose content the
+      protocol does not interpret; callers write Markdown. Any conversion to a
+      storage-specific format (such as HTML) happens inside each implementation.
     - ``permalink_url`` (``str``)
     - ``parent`` (``{"gid": str} | None``)
     - ``section_gid`` (``str | None``)
