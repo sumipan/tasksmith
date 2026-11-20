@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.2.3 - 2026-11-20
+
+### Changed
+
+- store: replace notes/html_notes with body on TaskStore
+
 ## 0.2.2 - 2026-11-20
 
 ### Changed

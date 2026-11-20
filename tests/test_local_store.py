@@ -1,4 +1,4 @@
-"""Behavior tests for LocalTaskStore. See Issue #7514."""
+"""Behavior tests for LocalTaskStore. See Issue #7514 and #7518."""
 
 from __future__ import annotations
 
@@ -15,13 +15,13 @@ def test_create_get_update_round_trip(tmp_path) -> None:
     task_id = store.create_task(
         "A",
         project_gid="p1",
-        html_notes="<body>x</body>",
+        body="<body>x</body>",
         due_on="2026-12-01",
     )
 
     task = store.get_task(task_id)
     assert task["name"] == "A"
-    assert task["html_notes"] == "<body>x</body>"
+    assert task["body"] == "<body>x</body>"
     assert task["due_on"] == "2026-12-01"
     assert task["completed"] is False
 
@@ -29,17 +29,17 @@ def test_create_get_update_round_trip(tmp_path) -> None:
     updated = store.get_task(task_id)
     assert updated["completed"] is True
     assert updated["name"] == "A"
-    assert updated["html_notes"] == "<body>x</body>"
+    assert updated["body"] == "<body>x</body>"
     assert (tmp_path / ".tasks" / "tasks" / f"{task_id}.json").is_file()
 
 
 def test_comment_and_description_change_are_recorded_as_stories(tmp_path) -> None:
     """Comments and description edits append stories while other updates do not."""
     store = LocalTaskStore(tmp_path)
-    task_id = store.create_task("S", project_gid="p1", html_notes="<body>x</body>")
+    task_id = store.create_task("S", project_gid="p1", body="<body>x</body>")
 
     store.add_comment(task_id, "hello")
-    store.update_task(task_id, html_notes="<body>y</body>")
+    store.update_task(task_id, body="<body>y</body>")
     stories = store.get_task_stories(task_id)
     assert len(stories) == 2
     assert stories[0]["type"] == "comment"
@@ -99,17 +99,40 @@ def test_subtasks_are_nested_in_numeric_id_order(tmp_path) -> None:
     assert "subtasks" not in children[1]
 
 
+def test_create_task_stores_body(tmp_path) -> None:
+    """AC1 (#7518): create_task with body persists and returns that body."""
+    store = LocalTaskStore(tmp_path)
+    task_id = store.create_task("t", body="# A")
+    assert store.get_task(task_id)["body"] == "# A"
+
+
+def test_body_change_appends_system_story(tmp_path) -> None:
+    """AC2 (#7518): body updates append a system story once per real change."""
+    store = LocalTaskStore(tmp_path)
+    task_id = store.create_task("t", body="# A")
+
+    store.update_task(task_id, body="# B")
+    task = store.get_task(task_id)
+    assert task["body"] == "# B"
+    stories = store.get_task_stories(task_id)
+    assert len(stories) == 1
+    assert stories[0]["type"] == "system"
+
+    store.update_task(task_id, body="# B")
+    assert len(store.get_task_stories(task_id)) == 1
+
+
 def test_parent_reads_latest_child_state(tmp_path) -> None:
-    """AC2: parent subtasks reflect the latest on-disk child state."""
+    """AC3: parent subtasks reflect the latest on-disk child state."""
     store = LocalTaskStore(tmp_path)
     parent = store.create_task("P", project_gid="p1")
     child = store.create_subtask(parent, "C", project_gid="p1")
-    store.update_task(child, completed=True, notes="updated")
+    store.update_task(child, completed=True, body="updated")
 
     parent_view = store.get_task(parent)
     nested = next(row for row in parent_view["subtasks"] if row["gid"] == child)
     assert nested["completed"] is True
-    assert nested["notes"] == "updated"
+    assert nested["body"] == "updated"
 
 
 def test_section_gid_round_trip(tmp_path) -> None:
@@ -129,7 +152,7 @@ def test_new_task_does_not_create_tag_storage(tmp_path) -> None:
     """AC4: new tasks never expose tags or create tags.json."""
     store = LocalTaskStore(tmp_path)
     task_id = store.create_task("T", project_gid="p1")
-    store.update_task(task_id, notes="n")
+    store.update_task(task_id, body="n")
 
     task = store.get_task(task_id)
     assert "tags" not in task
@@ -171,3 +194,55 @@ def test_legacy_tag_data_is_ignored_and_preserved(tmp_path) -> None:
     stored = json.loads((tasks_dir / "1.json").read_text(encoding="utf-8"))
     assert stored["tags"] == ["9"]
     assert tags_path.read_text(encoding="utf-8") == json.dumps([{"gid": "9", "name": "state:READY"}]) + "\n"
+
+
+def test_legacy_html_notes_is_read_as_body(tmp_path) -> None:
+    """AC4 (#7518): legacy html_notes on disk is exposed as body without rewriting files."""
+    tasks_dir = tmp_path / ".tasks" / "tasks"
+    tasks_dir.mkdir(parents=True)
+    legacy = {
+        "gid": "1",
+        "name": "Legacy",
+        "notes": "",
+        "html_notes": "<body>x</body>",
+        "completed": False,
+        "due_on": None,
+        "project": "p1",
+        "section": None,
+        "parent": None,
+        "assignee": None,
+        "created_at": "2026-01-01T00:00:00Z",
+        "modified_at": "2026-01-01T00:00:00Z",
+    }
+    task_path = tasks_dir / "1.json"
+    task_path.write_text(json.dumps(legacy, indent=2) + "\n", encoding="utf-8")
+    (tmp_path / ".tasks" / "counter").write_text("1\n", encoding="utf-8")
+
+    store = LocalTaskStore(tmp_path)
+    assert store.get_task("1")["body"] == "<body>x</body>"
+    assert task_path.read_text(encoding="utf-8") == json.dumps(legacy, indent=2) + "\n"
+
+
+def test_legacy_notes_is_read_as_body_when_html_notes_is_empty(tmp_path) -> None:
+    """AC5 (#7518): legacy notes is used as body when html_notes is empty."""
+    tasks_dir = tmp_path / ".tasks" / "tasks"
+    tasks_dir.mkdir(parents=True)
+    legacy = {
+        "gid": "1",
+        "name": "Legacy",
+        "notes": "plain",
+        "html_notes": "",
+        "completed": False,
+        "due_on": None,
+        "project": "p1",
+        "section": None,
+        "parent": None,
+        "assignee": None,
+        "created_at": "2026-01-01T00:00:00Z",
+        "modified_at": "2026-01-01T00:00:00Z",
+    }
+    (tasks_dir / "1.json").write_text(json.dumps(legacy, indent=2) + "\n", encoding="utf-8")
+    (tmp_path / ".tasks" / "counter").write_text("1\n", encoding="utf-8")
+
+    store = LocalTaskStore(tmp_path)
+    assert store.get_task("1")["body"] == "plain"
