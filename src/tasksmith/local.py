@@ -27,35 +27,17 @@ class LocalTaskStore:
         self._actor_name = actor_name
         self._tasks_root = self._root / ".tasks"
         self._tasks_dir = self._tasks_root / "tasks"
-        self._tags_path = self._tasks_root / "tags.json"
         self._counter_path = self._tasks_root / "counter"
         self._lock_path = self._tasks_root / "lock"
 
-    def default_client(self) -> Any:
-        return None
-
-    def ai_actor_names(self, client: Any = None) -> frozenset[str]:
+    def ai_actor_names(self) -> frozenset[str]:
         return frozenset({self._actor_name})
 
-    def get_task(
-        self,
-        task_gid: str,
-        *,
-        opt_fields: str | None = None,
-        client: Any = None,
-    ) -> dict:
-        del opt_fields, client
+    def get_task(self, task_gid: str) -> dict:
         raw = self._read_raw_task(task_gid)
-        return self._public_task(task_gid, raw)
+        return self._public_task(task_gid, raw, include_subtasks=not raw.get("parent"))
 
-    def list_tasks(
-        self,
-        project_gid: str | None = None,
-        *,
-        opt_fields: str | None = None,
-        client: Any = None,
-    ) -> list[dict]:
-        del opt_fields, client
+    def list_tasks(self, project_gid: str | None = None) -> list[dict]:
         if not self._tasks_dir.is_dir():
             return []
         items: list[dict] = []
@@ -66,12 +48,11 @@ class LocalTaskStore:
                 continue
             if project_gid is not None and raw.get("project") != project_gid:
                 continue
-            items.append(self._public_task(task_gid, raw))
+            items.append(self._public_task(task_gid, raw, include_subtasks=True))
         items.sort(key=lambda row: int(row["gid"]))
         return items
 
-    def get_task_stories(self, task_gid: str, *, client: Any = None) -> list[dict]:
-        del client
+    def get_task_stories(self, task_gid: str) -> list[dict]:
         self._require_task_file(task_gid)
         path = self._stories_path(task_gid)
         if not path.is_file():
@@ -92,9 +73,8 @@ class LocalTaskStore:
         notes: str | None = None,
         html_notes: str | None = None,
         assign_owner: str | None = None,
-        client: Any = None,
     ) -> str:
-        del assign_owner, client
+        del assign_owner
         return self._create_task_record(
             name,
             parent=None,
@@ -116,9 +96,8 @@ class LocalTaskStore:
         notes: str | None = None,
         html_notes: str | None = None,
         assign_owner: str | None = None,
-        client: Any = None,
     ) -> str:
-        del assign_owner, client
+        del assign_owner
         self._require_task_file(parent_gid)
         return self._create_task_record(
             name,
@@ -136,14 +115,11 @@ class LocalTaskStore:
         *,
         name: str | None = None,
         due_on: str | None = None,
+        section_gid: str | None = None,
         notes: str | None = None,
         html_notes: str | None = None,
         completed: bool | None = None,
-        assignee: str | None = None,
-        custom_fields: dict | None = None,
-        client: Any = None,
     ) -> None:
-        del custom_fields, client
         with self._locked():
             raw = self._read_raw_task(task_gid)
             description_changed = False
@@ -157,10 +133,10 @@ class LocalTaskStore:
                 raw["name"] = name
             if due_on is not None:
                 raw["due_on"] = due_on
+            if section_gid is not None:
+                raw["section"] = section_gid
             if completed is not None:
                 raw["completed"] = completed
-            if assignee is not None:
-                raw["assignee"] = assignee
             raw["modified_at"] = _utcnow()
             self._write_raw_task(task_gid, raw)
             if description_changed:
@@ -170,64 +146,10 @@ class LocalTaskStore:
                     text="changed the description",
                 )
 
-    def add_comment(self, task_gid: str, text: str, *, client: Any = None) -> None:
-        del client
+    def add_comment(self, task_gid: str, text: str) -> None:
         with self._locked():
             self._require_task_file(task_gid)
             self._append_story_locked(task_gid, story_type="comment", text=text)
-
-    def list_workspace_tags(self, workspace_gid: str, *, client: Any = None) -> list[dict]:
-        del workspace_gid, client
-        if not self._tags_path.is_file():
-            return []
-        return json.loads(self._tags_path.read_text(encoding="utf-8"))
-
-    def create_tag(
-        self,
-        workspace_gid: str,
-        *,
-        name: str,
-        client: Any = None,
-    ) -> dict:
-        del workspace_gid, client
-        with self._locked():
-            tags = self._load_tags_locked()
-            tag = {"gid": self._allocate_id_locked(), "name": name}
-            tags.append(tag)
-            self._save_tags_locked(tags)
-            return dict(tag)
-
-    def add_tag_to_task(self, task_gid: str, *, tag_gid: str, client: Any = None) -> None:
-        del client
-        with self._locked():
-            raw = self._read_raw_task(task_gid)
-            tags = self._load_tags_locked()
-            known = {row["gid"] for row in tags}
-            if tag_gid not in known:
-                raise TaskStoreError(f"unknown tag id: {tag_gid}")
-            tag_ids: list[str] = list(raw.get("tags") or [])
-            if tag_gid not in tag_ids:
-                tag_ids.append(tag_gid)
-                raw["tags"] = tag_ids
-                raw["modified_at"] = _utcnow()
-                self._write_raw_task(task_gid, raw)
-
-    def remove_tag_from_task(self, task_gid: str, *, tag_gid: str, client: Any = None) -> None:
-        del client
-        with self._locked():
-            if not self._task_path(task_gid).is_file():
-                raise TaskNotFoundError(task_gid)
-            tags = self._load_tags_locked()
-            known = {row["gid"] for row in tags}
-            if tag_gid not in known:
-                raise TaskStoreError(f"unknown tag id: {tag_gid}")
-            raw = self._read_raw_task(task_gid)
-            tag_ids = [gid for gid in (raw.get("tags") or []) if gid != tag_gid]
-            if tag_ids == (raw.get("tags") or []):
-                return
-            raw["tags"] = tag_ids
-            raw["modified_at"] = _utcnow()
-            self._write_raw_task(task_gid, raw)
 
     def _create_task_record(
         self,
@@ -254,24 +176,17 @@ class LocalTaskStore:
                 "section": section_gid,
                 "parent": parent,
                 "assignee": None,
-                "tags": [],
                 "created_at": now,
                 "modified_at": now,
             }
             self._write_raw_task(task_gid, record)
             return task_gid
 
-    def _public_task(self, task_gid: str, raw: dict) -> dict:
-        tag_lookup = {row["gid"]: row["name"] for row in self._load_tags_readonly()}
-        public_tags = [
-            {"gid": gid, "name": tag_lookup[gid]}
-            for gid in (raw.get("tags") or [])
-            if gid in tag_lookup
-        ]
+    def _public_task(self, task_gid: str, raw: dict, *, include_subtasks: bool) -> dict:
         parent = raw.get("parent")
         parent_pub = {"gid": parent} if parent else None
         path = self._task_path(task_gid)
-        return {
+        public: dict[str, Any] = {
             "gid": task_gid,
             "name": raw.get("name", ""),
             "completed": bool(raw.get("completed")),
@@ -279,9 +194,25 @@ class LocalTaskStore:
             "notes": raw.get("notes", ""),
             "html_notes": raw.get("html_notes", ""),
             "permalink_url": path.resolve().as_uri(),
-            "tags": public_tags,
             "parent": parent_pub,
+            "section_gid": raw.get("section"),
         }
+        if include_subtasks:
+            public["subtasks"] = self._direct_subtasks(task_gid)
+        return public
+
+    def _direct_subtasks(self, parent_gid: str) -> list[dict]:
+        if not self._tasks_dir.is_dir():
+            return []
+        children: list[dict] = []
+        for path in self._tasks_dir.glob("*.json"):
+            child_gid = path.stem
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            if raw.get("parent") != parent_gid:
+                continue
+            children.append(self._public_task(child_gid, raw, include_subtasks=False))
+        children.sort(key=lambda row: int(row["gid"]))
+        return children
 
     def _task_path(self, task_gid: str) -> Path:
         return self._tasks_dir / f"{task_gid}.json"
@@ -332,21 +263,6 @@ class LocalTaskStore:
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(story, ensure_ascii=False) + "\n")
-
-    def _load_tags_readonly(self) -> list[dict]:
-        if not self._tags_path.is_file():
-            return []
-        return json.loads(self._tags_path.read_text(encoding="utf-8"))
-
-    def _load_tags_locked(self) -> list[dict]:
-        self._tasks_root.mkdir(parents=True, exist_ok=True)
-        if not self._tags_path.is_file():
-            return []
-        return json.loads(self._tags_path.read_text(encoding="utf-8"))
-
-    def _save_tags_locked(self, tags: list[dict]) -> None:
-        self._tasks_root.mkdir(parents=True, exist_ok=True)
-        self._write_json(self._tags_path, tags)
 
     def _allocate_id_locked(self) -> str:
         self._tasks_root.mkdir(parents=True, exist_ok=True)
