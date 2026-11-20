@@ -19,6 +19,18 @@ def _utcnow() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _raw_body(raw: dict) -> str:
+    if "body" in raw:
+        return raw.get("body") or ""
+    html_notes = raw.get("html_notes")
+    if isinstance(html_notes, str) and html_notes:
+        return html_notes
+    notes = raw.get("notes")
+    if isinstance(notes, str) and notes:
+        return notes
+    return ""
+
+
 class LocalTaskStore:
     """TaskStore backed by ``<root>/.tasks/`` on disk."""
 
@@ -70,8 +82,7 @@ class LocalTaskStore:
         project_gid: str | None = None,
         due_on: str | None = None,
         section_gid: str | None = None,
-        notes: str | None = None,
-        html_notes: str | None = None,
+        body: str | None = None,
         assign_owner: str | None = None,
     ) -> str:
         del assign_owner
@@ -81,8 +92,7 @@ class LocalTaskStore:
             project_gid=project_gid,
             due_on=due_on,
             section_gid=section_gid,
-            notes=notes,
-            html_notes=html_notes,
+            body=body,
         )
 
     def create_subtask(
@@ -93,8 +103,7 @@ class LocalTaskStore:
         project_gid: str | None = None,
         due_on: str | None = None,
         section_gid: str | None = None,
-        notes: str | None = None,
-        html_notes: str | None = None,
+        body: str | None = None,
         assign_owner: str | None = None,
     ) -> str:
         del assign_owner
@@ -105,8 +114,7 @@ class LocalTaskStore:
             project_gid=project_gid,
             due_on=due_on,
             section_gid=section_gid,
-            notes=notes,
-            html_notes=html_notes,
+            body=body,
         )
 
     def update_task(
@@ -116,18 +124,14 @@ class LocalTaskStore:
         name: str | None = None,
         due_on: str | None = None,
         section_gid: str | None = None,
-        notes: str | None = None,
-        html_notes: str | None = None,
+        body: str | None = None,
         completed: bool | None = None,
     ) -> None:
         with self._locked():
             raw = self._read_raw_task(task_gid)
             description_changed = False
-            if notes is not None and notes != raw.get("notes", ""):
-                raw["notes"] = notes
-                description_changed = True
-            if html_notes is not None and html_notes != raw.get("html_notes", ""):
-                raw["html_notes"] = html_notes
+            if body is not None and body != _raw_body(raw):
+                raw["body"] = body
                 description_changed = True
             if name is not None:
                 raw["name"] = name
@@ -159,8 +163,7 @@ class LocalTaskStore:
         project_gid: str | None,
         due_on: str | None,
         section_gid: str | None,
-        notes: str | None,
-        html_notes: str | None,
+        body: str | None,
     ) -> str:
         with self._locked():
             task_gid = self._allocate_id_locked()
@@ -168,8 +171,7 @@ class LocalTaskStore:
             record = {
                 "gid": task_gid,
                 "name": name,
-                "notes": notes if notes is not None else "",
-                "html_notes": html_notes if html_notes is not None else "",
+                "body": body if body is not None else "",
                 "completed": False,
                 "due_on": due_on,
                 "project": project_gid,
@@ -191,8 +193,7 @@ class LocalTaskStore:
             "name": raw.get("name", ""),
             "completed": bool(raw.get("completed")),
             "due_on": raw.get("due_on"),
-            "notes": raw.get("notes", ""),
-            "html_notes": raw.get("html_notes", ""),
+            "body": _raw_body(raw),
             "permalink_url": path.resolve().as_uri(),
             "parent": parent_pub,
             "section_gid": raw.get("section"),

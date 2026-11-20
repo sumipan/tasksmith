@@ -23,7 +23,8 @@ class TaskStore(Protocol):
     - ``name`` (``str``)
     - ``completed`` (``bool``)
     - ``due_on`` (``str | None``)
-    - ``notes`` / ``html_notes`` (``str``)
+    - ``body`` (``str``; empty string when unset). Implementations may map
+      from storage-specific formats; the protocol does not define that mapping.
     - ``permalink_url`` (``str``)
     - ``parent`` (``{"gid": str} | None``)
     - ``section_gid`` (``str | None``)
@@ -50,8 +51,7 @@ class TaskStore(Protocol):
         project_gid: str | None = None,
         due_on: str | None = None,
         section_gid: str | None = None,
-        notes: str | None = None,
-        html_notes: str | None = None,
+        body: str | None = None,
         assign_owner: str | None = None,
     ) -> str:
         """Create a top-level task and return its id."""
@@ -64,8 +64,7 @@ class TaskStore(Protocol):
         project_gid: str | None = None,
         due_on: str | None = None,
         section_gid: str | None = None,
-        notes: str | None = None,
-        html_notes: str | None = None,
+        body: str | None = None,
         assign_owner: str | None = None,
     ) -> str:
         """Create a child task and return its id."""
@@ -77,8 +76,7 @@ class TaskStore(Protocol):
         name: str | None = None,
         due_on: str | None = None,
         section_gid: str | None = None,
-        notes: str | None = None,
-        html_notes: str | None = None,
+        body: str | None = None,
         completed: bool | None = None,
     ) -> None:
         """Patch fields that are not ``None``."""
