@@ -4,7 +4,81 @@ from __future__ import annotations
 
 import json
 
-from tasksmith import LocalTaskStore
+import pytest
+
+from tasksmith import LocalTaskStore, TaskNotFoundError, TaskStoreError
+
+
+def test_create_get_update_round_trip(tmp_path) -> None:
+    """Creating and updating a task persists its public fields on disk."""
+    store = LocalTaskStore(tmp_path)
+    task_id = store.create_task(
+        "A",
+        project_gid="p1",
+        html_notes="<body>x</body>",
+        due_on="2026-12-01",
+    )
+
+    task = store.get_task(task_id)
+    assert task["name"] == "A"
+    assert task["html_notes"] == "<body>x</body>"
+    assert task["due_on"] == "2026-12-01"
+    assert task["completed"] is False
+
+    store.update_task(task_id, completed=True)
+    updated = store.get_task(task_id)
+    assert updated["completed"] is True
+    assert updated["name"] == "A"
+    assert updated["html_notes"] == "<body>x</body>"
+    assert (tmp_path / ".tasks" / "tasks" / f"{task_id}.json").is_file()
+
+
+def test_comment_and_description_change_are_recorded_as_stories(tmp_path) -> None:
+    """Comments and description edits append stories while other updates do not."""
+    store = LocalTaskStore(tmp_path)
+    task_id = store.create_task("S", project_gid="p1", html_notes="<body>x</body>")
+
+    store.add_comment(task_id, "hello")
+    store.update_task(task_id, html_notes="<body>y</body>")
+    stories = store.get_task_stories(task_id)
+    assert len(stories) == 2
+    assert stories[0]["type"] == "comment"
+    assert stories[0]["text"] == "hello"
+    assert stories[1]["text"] == "changed the description"
+    ai_names = store.ai_actor_names()
+    assert stories[0]["created_by"]["name"] in ai_names
+    assert stories[1]["created_by"]["name"] in ai_names
+
+    store.update_task(task_id, completed=True)
+    assert len(store.get_task_stories(task_id)) == 2
+
+
+def test_unknown_task_raises_not_found(tmp_path) -> None:
+    """Missing tasks consistently surface TaskNotFoundError."""
+    store = LocalTaskStore(tmp_path)
+    missing = "999999"
+
+    with pytest.raises(TaskNotFoundError):
+        store.get_task(missing)
+    with pytest.raises(TaskNotFoundError):
+        store.update_task(missing, completed=True)
+    with pytest.raises(TaskNotFoundError):
+        store.add_comment(missing, "nope")
+    with pytest.raises(TaskNotFoundError):
+        store.get_task_stories(missing)
+
+    assert issubclass(TaskNotFoundError, TaskStoreError)
+
+
+def test_ids_are_unique_across_two_store_instances(tmp_path) -> None:
+    """Store instances sharing a root never reuse IDs."""
+    left = LocalTaskStore(tmp_path)
+    right = LocalTaskStore(tmp_path)
+    ids: list[str] = []
+    for _ in range(3):
+        ids.append(left.create_task("L"))
+        ids.append(right.create_task("R"))
+    assert len(ids) == len(set(ids))
 
 
 def test_subtasks_are_nested_in_numeric_id_order(tmp_path) -> None:
