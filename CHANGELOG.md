@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.5.1 - 2026-11-21
+
+### Changed
+
+- tasksmith: rewrite README and pyproject as coordinator (#7529)
+
 ## 0.5.0 - 2026-11-21
 
 ### Added
