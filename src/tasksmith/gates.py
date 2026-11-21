@@ -28,7 +28,7 @@ AC_MAX_COUNT = 7
 
 _URL_IN_TEXT_RE = re.compile(r"https?://[^\s<>\"]+")
 _FILE_PATH_RE = re.compile(
-    r"(?:[A-Za-z]:[\\/]|/(?:[\w.-]+/)+[\w.-]+|(?:^|[\s\u3000])(?:[\w.-]+/)+[\w.-]+|"
+    r"(?:[A-Za-z]:[\\/]|/(?:[\w.-]+/)+[\w.-]+|(?:^|\s)(?:[\w.-]+/)+[\w.-]+|"
     r"[\w.-]+\.(?:md|txt|pdf|docx?|xlsx?|csv|json|ya?ml)\b)",
     re.I,
 )
