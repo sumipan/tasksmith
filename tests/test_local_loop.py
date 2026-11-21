@@ -125,6 +125,10 @@ def test_local_one_loop_human_then_ai(loop_env, tmp_path: Path) -> None:
     result_path = tmp_path / "result.md"
     result_path.write_text("PIPELINE_STATUS: DONE\n", encoding="utf-8")
     finish_node(gid_b, result_path=result_path, meta_digest=ex.submits[0][2])
+    secs_b = parse_sections(store.get_task(gid_b)["body"])
+    assert secs_b is not None
+    assert parse_meta_field(secs_b, "state") == PipelineState.DONE.value
+
     rec = reconcile()
     assert rec.ready == []
     assert rec.waiting_human == []
