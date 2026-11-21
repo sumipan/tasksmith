@@ -9,13 +9,18 @@ description = "Task orchestration storage layer with a pluggable store and local
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+  "ghdag @ git+https://github.com/sumipan/ghdag.git@v0.152.1",
+]
 
 [project.optional-dependencies]
 dev = [
   "pytest>=7.0.0",
   "ruff>=0.4.0",
 ]
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/tasksmith"]
@@ -43,3 +48,6 @@ select = ["E", "F", "I", "W"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["E501"]
+"src/tasksmith/reconcile.py" = ["E501"]
+"src/tasksmith/tick.py" = ["E501"]
+"src/tasksmith/transition.py" = ["E501"]
