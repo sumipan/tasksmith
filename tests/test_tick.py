@@ -8,10 +8,10 @@ import pytest
 
 from tasksmith import LocalTaskStore
 from tasksmith.body import build_controlled_notes, parse_sections
-from tasksmith.runtime import set_task_store
-from tasksmith.settings import Settings, set_settings
 from tasksmith.execution import set_executor
 from tasksmith.model import OwnerType, PipelineState
+from tasksmith.runtime import set_task_store
+from tasksmith.settings import Settings, set_settings
 from tasksmith.tick import finish_node, recover, tick
 
 

@@ -7,10 +7,10 @@ import pytest
 from tasksmith import LocalTaskStore
 from tasksmith.body import build_controlled_notes, update_meta_field
 from tasksmith.execution import set_executor
-from tasksmith.runtime import set_task_store
-from tasksmith.settings import Settings, set_settings
 from tasksmith.model import OwnerType, PipelineState
 from tasksmith.reconcile import reconcile
+from tasksmith.runtime import set_task_store
+from tasksmith.settings import Settings, set_settings
 from tasksmith.transition import transition_task
 
 

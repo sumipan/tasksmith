@@ -7,9 +7,9 @@ import pytest
 from tasksmith import LocalTaskStore
 from tasksmith.body import build_controlled_notes, parse_sections, serialize_sections
 from tasksmith.execution import set_executor
+from tasksmith.model import OwnerType, PipelineState
 from tasksmith.runtime import set_task_store
 from tasksmith.settings import Settings, set_settings
-from tasksmith.model import OwnerType, PipelineState
 from tasksmith.transition import transition_task
 
 
