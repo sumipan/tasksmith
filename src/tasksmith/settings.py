@@ -28,6 +28,11 @@ class Settings:
     request_channel_id: str | None = None
     timezone: str = "UTC"
     sections: SectionsConfig | None = None
+    remind_after_hours: int = 24
+    remind_max_count: int = 3
+    review_daily_cap: int = 3
+    quiet_hours: tuple[str, str] | None = None
+    digest_at: str | None = None
 
 
 def settings() -> Settings:
