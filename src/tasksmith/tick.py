@@ -296,6 +296,35 @@ def _reconcile_counts(result: ReconcileResult) -> dict[str, int]:
 def _tz() -> ZoneInfo:
     return ZoneInfo(settings().timezone)
 
+
+_QUIET_HOURS_TIME_RE = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
+
+
+def _parse_hhmm(s: str) -> tuple[int, int]:
+    m = _QUIET_HOURS_TIME_RE.match(s.strip())
+    if not m:
+        raise ValueError(f"Not in HH:MM format: {s!r}")
+    return int(m.group(1)), int(m.group(2))
+
+
+def _is_quiet_hours(now: datetime, quiet_hours: list[str]) -> bool:
+    """Whether the current time is within quiet_hours (start, end), including midnight wrap."""
+    if not quiet_hours or len(quiet_hours) != 2:
+        return False
+    try:
+        sh, sm = _parse_hhmm(quiet_hours[0])
+        eh, em = _parse_hhmm(quiet_hours[1])
+    except ValueError:
+        return False
+    now_jst = now.astimezone(_tz())
+    now_min = now_jst.hour * 60 + now_jst.minute
+    start_min = sh * 60 + sm
+    end_min = eh * 60 + em
+    if start_min <= end_min:
+        return start_min <= now_min < end_min
+    return now_min >= start_min or now_min < end_min
+
+
 def _objective_text(sections: dict[str, str]) -> str:
     return sections.get("objective") or ""
 
@@ -597,10 +626,13 @@ def tick(
     *,
     dry_run: bool = False,
     max_running: int = 1,
+    max_human: int = 3,
+    max_review: int = 1,
     max_rollup: int = 5,
     max_adopt: int = 10,
     max_section: int = 5,
     metrics_path: Path | None = None,
+    digest_state_path: Path | None = None,
     now: datetime | None = None,
     event_sink: EventSink | None = None,
     on_reconcile: Callable[[ReconcileResult], None] | None = None,
@@ -629,10 +661,13 @@ def tick(
                 project_gid,
                 dry_run=dry_run,
                 max_running=max_running,
+                max_human=max_human,
+                max_review=max_review,
                 max_rollup=max_rollup,
                 max_adopt=max_adopt,
                 max_section=max_section,
                 metrics_path=metrics_path,
+                digest_state_path=digest_state_path,
                 now=now,
                 event_sink=event_sink,
                 on_reconcile=on_reconcile,
@@ -658,17 +693,34 @@ def _tick_body(
     *,
     dry_run: bool = False,
     max_running: int = 1,
+    max_human: int = 3,
+    max_review: int = 1,
     max_rollup: int = 5,
     max_adopt: int = 10,
     max_section: int = 5,
     metrics_path: Path | None = None,
+    digest_state_path: Path | None = None,
     now: datetime | None = None,
     event_sink: EventSink | None = None,
     on_reconcile: Callable[[ReconcileResult], None] | None = None,
 ) -> TickResult:
     """The tick body (called from the metrics wrapper)."""
+    from tasksmith.human import (
+        RequestHumanResult,
+        _request_review_batch,
+        build_human_request_text,
+        post_review_digest,
+        remind_waiting_humans,
+        request_human,
+    )
+    from tasksmith.runtime import human_channel_installed
+
     if max_running < 1:
         raise ValueError("--max must be 1 or greater")
+    if max_human < 0:
+        raise ValueError("--max-human must be 0 or greater")
+    if max_review < 0:
+        raise ValueError("--max-review must be 0 or greater")
     if max_rollup < 0:
         raise ValueError("--max-rollup must be 0 or greater")
     if max_adopt < 0:
@@ -684,7 +736,10 @@ def _tick_body(
 
     counts = _reconcile_counts(result)
     warnings_t = tuple(result.warnings)
+    st = settings()
     now_dt = now or datetime.now(_tz())
+    quiet_hours = list(st.quiet_hours) if st.quiet_hours else None
+    in_quiet = _is_quiet_hours(now_dt, quiet_hours) if quiet_hours else False
     messages: list[str] = []
     messages.extend(result.warnings)
 
@@ -712,7 +767,22 @@ def _tick_body(
     for err in adopt.errors:
         messages.append(f"adopt error: {err}")
     _block_failed_running_ai_nodes(project_gid, dry_run=dry_run, messages=messages)
-    reminded: list[str] = []
+    channel_available = human_channel_installed()
+    if not dry_run and not channel_available:
+        if result.waiting_human:
+            messages.append("skip remind: human_channel not installed")
+        reminded: list[str] = []
+    else:
+        reminded = remind_waiting_humans(
+            result.waiting_human,
+            remind_after_hours=int(st.remind_after_hours),
+            remind_max_count=int(st.remind_max_count),
+            dry_run=dry_run,
+            project_gid=project_gid,
+            now=now_dt,
+        )
+    if reminded:
+        messages.append(f"reminded: {', '.join(reminded)}")
 
     # move completable parents to DONE (dry-run only reports)
     completed_parents: list[str] = []
@@ -747,8 +817,7 @@ def _tick_body(
             continue
         gated_ready.append(node)
 
-    # right after design_doc_gate, before elaborate / request_review: fill in the body section: and move lanes
-    # (settle the lane before the "lane selection required" of request_review)
+    # right after design_doc_gate, before request_review: fill in the body section: and move lanes
     if max_section > 0 and result.unsectioned:
         messages.extend(
             _assign_sections_step(
@@ -760,12 +829,81 @@ def _tick_body(
             )
         )
 
-    # right after design_doc_gate: complete the executor etc. of AI REVIEW nodes with the LLM
-    # nodes made READY are excluded from request_review / the daily digest of the same tick
-    # personal tasks are outside the dag pipeline (request_human / AI jobs)
+    review_after_elaborate = list(result.review)
+    if in_quiet:
+        if result.review or result.overdue:
+            messages.append(language().messages["tick.skip_review_digest_quiet"])
+    elif not dry_run and not channel_available:
+        if result.review or result.overdue:
+            messages.append("skip review/digest: human_channel not installed")
+    else:
+        messages.extend(
+            _request_review_batch(
+                result.review,
+                project_gid=project_gid,
+                max_review=max_review,
+                dry_run=dry_run,
+                now=now,
+                event_sink=event_sink,
+            )
+        )
+        messages.extend(
+            post_review_digest(
+                review=review_after_elaborate,
+                overdue=result.overdue,
+                inverted_periods=getattr(result, "inverted_periods", None) or [],
+                dry_run=dry_run,
+                digest_state_path=digest_state_path,
+                now=now,
+            )
+        )
+
     human_ready = [n for n in gated_ready if n.owner_type == OwnerType.HUMAN.value and n.flow_type == "dag"]
     counts["human_ready"] = len(human_ready)
     ai_ready = [n for n in gated_ready if n.owner_type == OwnerType.AI.value and n.flow_type == "dag"]
+
+    human_result: RequestHumanResult | None = None
+    waiting_count = len(result.waiting_human)
+    if human_ready and waiting_count < max_human and not in_quiet:
+        node = human_ready[0]
+        channel_id = st.request_channel_id
+        channel_ok = isinstance(channel_id, str) and bool(channel_id.strip())
+        if not channel_ok:
+            messages.append(language().messages["tick.skip_human_no_channel"])
+        elif not channel_available:
+            messages.append("skip human channel: human_channel not installed")
+        elif dry_run:
+            task = task_store().get_task(node.task_gid)
+            secs = parse_sections(task.get("body") if isinstance(task.get("body"), str) else "")
+            preview = (
+                build_human_request_text(task_name=node.name, sections=secs or {})
+                if secs
+                else ""
+            )
+            human_result = RequestHumanResult(
+                task_gid=node.task_gid,
+                channel_id=channel_id if isinstance(channel_id, str) else None,
+                thread_ts=None,
+                request_text=preview,
+                dry_run=True,
+            )
+            messages.append(f"dry-run human: gid={node.task_gid} name={node.name!r}")
+        else:
+            human_result = request_human(
+                node.task_gid,
+                project_gid=project_gid,
+                dry_run=False,
+                event_sink=event_sink,
+            )
+            messages.append(
+                f"requested_human gid={human_result.task_gid} channel={human_result.channel_id} ts={human_result.thread_ts}"
+            )
+    elif human_ready and waiting_count >= max_human:
+        messages.append(
+            language().messages["tick.skip_human_cap"].format(
+                waiting_count=waiting_count, max_human=max_human
+            )
+        )
 
     # AI path
     running = _count_running_from_project(project_gid)
@@ -807,11 +945,18 @@ def _tick_body(
                 task_gid=node.task_gid,
                 name=node.name,
                 order_preview=order_preview,
+                request_text=human_result.request_text if human_result else None,
                 reminded_gids=tuple(reminded),
                 counts=counts,
                 warnings=warnings_t,
                 message=(
-                    "\n".join(messages) + (f"\n--- order ---\n{order_preview}" if order_preview else "")
+                    "\n".join(messages)
+                    + (f"\n--- order ---\n{order_preview}" if order_preview else "")
+                    + (
+                        f"\n--- human request ---\n{human_result.request_text}"
+                        if human_result
+                        else ""
+                    )
                 ).strip(),
             )
 
@@ -845,6 +990,7 @@ def _tick_body(
             order_path=None,
             idempotency_key=idem_key,
             order_preview=order_preview,
+            request_text=human_result.request_text if human_result else None,
             reminded_gids=tuple(reminded),
             counts=counts,
             warnings=warnings_t,
@@ -876,6 +1022,17 @@ def _tick_body(
                 messages.append(f"rollup_parent_due warning gid={parent_gid}")
     if rolled_up_parents_count:
         counts["rolled_up_parents"] = rolled_up_parents_count
+    if human_result is not None:
+        return TickResult(
+            status="dry_run" if dry_run else "requested_human",
+            task_gid=human_result.task_gid,
+            name=next((n.name for n in human_ready if n.task_gid == human_result.task_gid), None),
+            request_text=human_result.request_text,
+            reminded_gids=tuple(reminded),
+            counts=counts,
+            warnings=warnings_t,
+            message="\n".join(messages) or f"requested_human gid={human_result.task_gid}",
+        )
     if reminded:
         return TickResult(
             status="reminded",

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.5.0 - 2026-11-21
+
+### Added
+
+- tasksmith: port human channel, CLI, and local loop (issue #7528)
+
 ## 0.4.0 - 2026-11-21
 
 ### Added
