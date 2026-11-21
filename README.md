@@ -108,15 +108,61 @@ ready=0 review=0 waiting_human=0 blocked=0 drift=0
 
 (after the full human and AI loop completes)
 
+**External wait demo** — use another empty directory. No runner or LLM is required; `tick` must still pass `--route`, but EXTERNAL probes do not enqueue ghdag jobs.
+
+```bash
+python -m tasksmith --root /tmp/tasksmith-wait external add --title "wait demo" --check time --in 0 --param text=hello
+```
+
+```
+1
+```
+
+```bash
+python -m tasksmith --root /tmp/tasksmith-wait --route claude tick
+```
+
+```
+external gid=1 done
+```
+
+```bash
+cat /tmp/tasksmith-wait/.tasks/announcements.md
+```
+
+```
+hello
+```
+
+Task `1` ends in `state: DONE`.
+
 ## Concepts
 
 **Pipeline states** (`model.PipelineState`): `READY`, `RUNNING`, `WAITING_HUMAN`, `REVIEW`, `DONE`, `BLOCKED`. (`NORMALIZED` is a normalize-step marker, not a state-machine state.)
 
-**Owners** (`model.OwnerType`): `HUMAN`, `AI`.
+**Owners** (`model.OwnerType`): `HUMAN`, `AI`, `EXTERNAL`.
+
+**External nodes** wait on an outside condition instead of an executor or a human reply. During `tick`, tasksmith probes DAG nodes that are `state: READY` and `owner: EXTERNAL` once `check_at` has passed.
+
+- **Built-in probes** (`external.BUILTIN_PROBES`): `time` marks the node `DONE` when due; the `check_params` key `text` becomes the announcement body. `file_exists` completes when `check_params.path` exists (`~` is expanded).
+- **Host probes**: `Settings(probes={"name": probe})` where `probe(task: dict, params: dict[str, str]) -> ProbeResult`. `ProbeResult.status` is `done` (complete), `continue` (poll again), or `speak` (announce `report`, then poll again). Names in `Settings.probes` override built-ins with the same name (`external.resolve_probe`).
+- **Control metadata** (`external.new_external_body`): `check`, `check_at` (`YYYY-MM-DDTHH:MM`; no offset uses `Settings.timezone`), `check_every` (minutes, default 60), `check_max` (default 5), optional `check_window` (`HH:MM-HH:MM`, midnight wrap allowed), optional `check_params` (JSON object of strings), optional `report_to`, and `_checks` (attempt count, written by tasksmith). Invalid values or unknown `check` names are sent to `REVIEW` by the design gate on `tick` (`external.external_violations`; rule ids `design_doc.external_check_unknown` / `design_doc.external_meta_invalid`).
+- **Scheduling**: Outside `check_window`, `check_at` moves to the next window opening. During `Settings.quiet_hours`, probes are skipped. Each `tick` runs at most `--max-external` nodes (default 3). Non-`done` outcomes and probe errors count as one check; when `_checks` reaches `check_max`, the node becomes `BLOCKED`.
+- **Notifications**: With `report_to`, `HumanChannel.follow_up(report_to, text)`; otherwise `HumanChannel.announce(text)` (the bundled `FileChannel` appends to `.tasks/announcements.md`). Default completion text is `External task <name> completed`; exhaustion is `External task <name> exhausted after <n> checks` (`language_en`).
 
 **Body shape**: eight sections — `Objective`, `Deliverables`, `Procedure and constraints`, `Acceptance criteria`, `Open decisions`, `Working draft`, `References`, `Control metadata` (headings come from the bundled English pack). In `Control metadata`, common fields include `format: tasksmith/v1`, `state`, `owner`, `flow`, `executor`, `inputs`, `outputs`, and `depends_on`. Fields whose names start with `_` are internal and written by tasksmith. Humans may edit `EDITABLE_SECTIONS` only: `Working draft` and `Acceptance criteria` (`body.EDITABLE_SECTIONS`).
 
 **Dependencies**: a node is not ready until every task id listed in `depends_on` is `DONE`.
+
+## todo.md
+
+Tasks are canonical; `todo.md` is a human-facing view.
+
+- **Line shape**: `- [ ] <text>` (open) or `- [x] <text>` (checked). Other lines are ignored.
+- **Mark**: registered lines gain `<!-- task:<id> -->` at the end of the line.
+- **Candidates** (`todo candidates` / `todo.candidates`): open, unmarked lines as a JSON array of `line_id` (first 12 hex chars of SHA-1 of the full line), `text`, and `line_no`.
+- **Register** (`todo register PATH --decisions FILE` / `todo.register`): decisions are `[{"line_id": "...", "register": true|false, "reason": "...", "owner": "AI"|"HUMAN", "section": "..."}]`. Lines with `register: true` create a task in `state: REVIEW` (`HUMAN` uses `flow: personal`, otherwise `flow: dag`; default owner `AI`), stamp the line, and rewrite `todo.md` atomically. Output fields: `registered`, `skipped`, `failed`, `skipped_reasons`, `failures`.
+- **Drift** (`todo drift` / `todo.find_drift`): compare marked lines with tasks; report `task_missing`, `checked_in_todo`, `unchecked_in_todo`, or `text_changed`. **Read-only** — never writes `todo.md` or tasks.
 
 ## Ports
 
@@ -129,7 +175,7 @@ Four ports define how tasksmith talks to storage, humans, execution, and LLM int
 | Executor | `tasksmith.execution.Executor` — `used`, `submit`, `failure` | `GhdagExecutor` | `tasksmith.execution.set_executor` |
 | Thinker | `tasksmith.execution.Thinker` — `ask` | `GhdagThinker` | `tasksmith.execution.set_thinker` |
 
-Hosts also call `tasksmith.settings.set_settings(Settings(...))` and may attach `tasksmith.events.EventSink` listeners. The CLI `--root` wires these four ports plus `Settings` with `LocalTaskStore`, `FileChannel`, and the ghdag-backed executor and thinker.
+Hosts also call `tasksmith.settings.set_settings(Settings(...))` — including `Settings.probes` for custom EXTERNAL probes (see **External nodes** above) — and may attach `tasksmith.events.EventSink` listeners. The CLI `--root` wires these four ports plus `Settings` with `LocalTaskStore`, `FileChannel`, and the ghdag-backed executor and thinker.
 
 ## On-disk layout
 
@@ -160,7 +206,11 @@ python -m tasksmith [--root DIR] [--queue-dir DIR] [--route ENGINE[:MODEL]]... C
 | Command | Purpose |
 |---------|---------|
 | `reconcile` | Scan tasks and report ready, review, waiting human, blocked, and drift buckets. |
-| `tick` | Advance the pipeline (enqueue AI work, request humans). **Requires `--route`.** |
+| `tick` | Advance the pipeline (enqueue AI work, request humans, run EXTERNAL probes). **Requires `--route`.** `--max-external` (default 3) caps probes per tick. |
+| `external add` | Create an EXTERNAL task. Requires `--title` and `--check`; exactly one of `--at ISO` or `--in MINUTES`; optional `--every`, `--max` (`check_max`, default 5), `--window`, repeated `--param key=value`, `--report-to`, `--project`. Prints the new task id. |
+| `todo candidates` | List open unmarked lines in `todo.md` (JSON). |
+| `todo register` | Register lines as tasks (`PATH --decisions FILE`, JSON result). |
+| `todo drift` | Report todo vs task drift (JSON; no writes). |
 | `section` | Assign section ids from host rules (`--max` default 200). |
 | `adopt` | Adopt store completion flags into pipeline state. |
 | `finish-node` | Apply a job result to a task (`task_gid --result PATH --meta-digest DIGEST`). |
@@ -182,6 +232,7 @@ Only the modules and names below are public. Names not listed here, and any modu
 | `tasksmith.cli` | `main` |
 | `tasksmith.events` | `EVENT_KINDS`, `EventKind`, `EventSink`, `NullSink`, `TasksmithEvent`, `first_line`, `safe_emit`, `utc_now_iso` |
 | `tasksmith.execution` | `EngineFailed`, `EngineUnavailable`, `Executor`, `GhdagExecutor`, `GhdagThinker`, `Thinker`, `executor`, `set_executor`, `set_thinker`, `thinker` |
+| `tasksmith.external` | `BUILTIN_PROBES`, `Probe`, `ProbeResult`, `external_violations`, `format_check_at`, `in_window`, `new_external_body`, `next_window_start`, `parse_check_at`, `parse_check_params`, `resolve_probe` |
 | `tasksmith.gates` | `AC_MAX_COUNT`, `AC_MIN_COUNT`, `check_design_doc`, `format_violations_comment` |
 | `tasksmith.human` | `HumanChannel`, `RequestHumanResult`, `RequestReviewResult`, `RecordHumanReplyResult`, `build_human_request_text`, `request_human`, `build_review_request_text`, `request_review`, `post_review_digest`, `collect_human_reply_violations`, `record_human_reply`, `remind_waiting_humans`, `parse_judgment_choices` |
 | `tasksmith.language` | `LanguagePack`, `SECTION_IDS`, `language`, `language_installed`, `set_language` |
@@ -192,6 +243,7 @@ Only the modules and names below are public. Names not listed here, and any modu
 | `tasksmith.sections` | `SectionDef`, `SectionsConfig`, `classify_section`, `evaluate_classification`, `sections_config_from_mapping` |
 | `tasksmith.settings` | `Settings`, `set_settings`, `settings`, `settings_installed` |
 | `tasksmith.tick` | `AdoptResult`, `FinishNodeResult`, `RecoverResult`, `SectionAssignment`, `TickResult`, `adopt_completions`, `aggregate_metrics`, `assign_sections`, `finish_node`, `format_metrics_text`, `recover`, `tick` |
+| `tasksmith.todo` | `RegisterResult`, `candidates`, `find_drift`, `line_id`, `register` |
 | `tasksmith.transition` | `RollupResult`, `pipeline_status_comment`, `plan_parent_due`, `rollup_parent_due`, `rollup_parent_of_task`, `transition_task`, `validate_subtask_row` |
 | `tasksmith.file_channel` | `FileChannel` |
 
