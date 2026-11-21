@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.7.2 - 2026-11-22
+
+### Changed
+
+- deps: declare ghdag as lower bound and install from git in CI
+
 ## 0.7.1 - 2026-11-21
 
 ### Changed

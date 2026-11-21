@@ -4,13 +4,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tasksmith"
-version = "0.7.1"
+version = "0.7.2"
 description = "A coordinator that moves work forward when humans and AI agents are nodes in the same task DAG"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12"
 dependencies = [
-  "ghdag @ git+https://github.com/sumipan/ghdag.git@v0.152.2",
+  "ghdag>=0.152.2",
 ]
 
 [project.optional-dependencies]

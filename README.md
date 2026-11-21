@@ -5,10 +5,11 @@ tasksmith is a coordinator that moves work forward when humans and AI agents are
 ## Install
 
 ```bash
+pip install "ghdag @ git+https://github.com/sumipan/ghdag.git@main"
 pip install -e ".[dev]"
 ```
 
-Python 3.12 or newer. The only runtime dependency is `ghdag`, pinned in `pyproject.toml`.
+Python 3.12 or newer. The only runtime dependency is `ghdag`. `pyproject.toml` declares only a lower bound (`ghdag>=0.152.2`) and no source, so install ghdag first; the host that uses tasksmith decides which ghdag version to install.
 
 ## Quick start
 
