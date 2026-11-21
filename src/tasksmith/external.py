@@ -182,18 +182,15 @@ def external_violations(sections: dict[str, str]) -> list[Violation]:
             )
         )
     check_at_raw = parse_meta_field(sections, "check_at")
-    if check_at_raw:
-        try:
-            parse_check_at(check_at_raw)
-        except ValueError:
-            violations.append(
-                Violation(
-                    rule_id="design_doc.external_meta_invalid",
-                    message=texts["design_doc.external_meta_invalid.detail"].format(
-                        field="check_at"
-                    ),
-                )
+    try:
+        parse_check_at(check_at_raw or "")
+    except ValueError:
+        violations.append(
+            Violation(
+                rule_id="design_doc.external_meta_invalid",
+                message=texts["design_doc.external_meta_invalid.detail"].format(field="check_at"),
             )
+        )
     for field in ("check_every", "check_max"):
         if _positive_int(parse_meta_field(sections, field)) is None:
             violations.append(

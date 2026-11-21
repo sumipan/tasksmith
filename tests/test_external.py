@@ -346,3 +346,20 @@ def test_quiet_hours_skips_external(external_env) -> None:
     tick(now=datetime(2026, 11, 21, 23, 0, tzinfo=UTC))
 
     assert store.get_task(gid)["body"] == before
+
+
+
+def test_missing_check_at_is_meta_invalid(external_env) -> None:
+    """A waiting node without check_at is flagged (tick would never pick it up)."""
+    from tasksmith.external import external_violations
+
+    body = _past_external(check="time")
+    assert external_violations(parse_sections(body)) == []
+    stripped = "\n".join(
+        line for line in body.splitlines() if not line.startswith("- check_at:")
+    )
+    sections = parse_sections(stripped)
+    assert sections is not None
+    assert parse_meta_field(sections, "check_at") is None
+    rules = [v.rule_id for v in external_violations(sections)]
+    assert rules == ["design_doc.external_meta_invalid"]
