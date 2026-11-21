@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.3.0 - 2026-11-21
+
+### Added
+
+- core: add tasksmith foundation modules for issue 7526
+
+### Fixed
+
+- repair: drop CJK unicode escape from file-path regex (#7526)
+
 ## 0.2.3 - 2026-11-20
 
 ### Changed
