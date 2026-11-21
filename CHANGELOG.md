@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.6.0 - 2026-11-21
+
+### Added
+
+- todo: add todo.md registration and drift reporting
+
 ## 0.5.1 - 2026-11-21
 
 ### Changed

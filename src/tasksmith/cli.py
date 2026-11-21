@@ -29,6 +29,9 @@ from tasksmith.tick import (
     recover,
     tick,
 )
+from tasksmith.todo import candidates as todo_candidates
+from tasksmith.todo import find_drift as todo_find_drift
+from tasksmith.todo import register as todo_register
 
 __all__ = ["main"]
 
@@ -176,9 +179,11 @@ def main(argv: list[str] | None = None) -> int:
             "request-human",
             "record-human-reply",
             "metrics",
+            "todo",
         ),
     )
     parser.add_argument("task_gid", nargs="?", default=None)
+    parser.add_argument("todo_path", nargs="?", default=None)
     parser.add_argument("--result", dest="result_path", default=None)
     parser.add_argument("--meta-digest", dest="meta_digest", default=None)
     parser.add_argument("--project", dest="project_gid", default=None)
@@ -192,6 +197,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-section", dest="max_section", type=int, default=5)
     parser.add_argument("--message", default=None)
     parser.add_argument("--ref", default=None)
+    parser.add_argument("--decisions", default=None, help="JSON file of registration decisions (todo register)")
     parser.add_argument("--days", type=int, default=7)
     args = parser.parse_args(argv)
 
@@ -226,6 +232,38 @@ def main(argv: list[str] | None = None) -> int:
                 print(json.dumps(summary, ensure_ascii=False, indent=2))
             else:
                 print(format_metrics_text(summary))
+            return 0
+
+        if args.command == "todo":
+            action = args.task_gid
+            if action not in ("candidates", "register", "drift"):
+                print("error: todo requires candidates, register, or drift", file=sys.stderr)
+                return 2
+            if not args.todo_path:
+                print("error: todo requires a todo.md path", file=sys.stderr)
+                return 2
+            path = Path(args.todo_path)
+            if action == "register" and not args.decisions:
+                print("error: todo register requires --decisions", file=sys.stderr)
+                return 2
+            if action == "candidates":
+                text = path.read_text(encoding="utf-8") if path.exists() else ""
+                payload = todo_candidates(text)
+                print(json.dumps(payload, ensure_ascii=False, indent=2 if args.json else None))
+                return 0
+            if action == "drift":
+                text = path.read_text(encoding="utf-8") if path.exists() else ""
+                payload = todo_find_drift(text, task_store())
+                print(json.dumps(payload, ensure_ascii=False, indent=2 if args.json else None))
+                return 0
+            decisions = json.loads(Path(args.decisions).read_text(encoding="utf-8"))
+            result = todo_register(
+                path,
+                decisions,
+                project_id=args.project_gid,
+                store=task_store(),
+            )
+            print(json.dumps(asdict(result), ensure_ascii=False, indent=2 if args.json else None))
             return 0
 
         if args.command == "reconcile":
