@@ -12,6 +12,7 @@ from tasksmith.body import (
     parse_meta_field,
     section_items,
 )
+from tasksmith.external import external_violations
 from tasksmith.language import SECTION_IDS, language
 from tasksmith.model import FLOW_DAG, OwnerType, Violation
 from tasksmith.settings import settings
@@ -120,6 +121,11 @@ def check_design_doc(
                     message=texts["design_doc.objective_empty.detail"],
                 )
             )
+        _check_section_meta(sections, sections_config=sections_config, is_subtask=is_subtask, violations=violations)
+        return violations
+
+    if is_dag and owner == OwnerType.EXTERNAL.value:
+        violations.extend(external_violations(sections))
         _check_section_meta(sections, sections_config=sections_config, is_subtask=is_subtask, violations=violations)
         return violations
 
