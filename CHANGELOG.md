@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 0.4.0 - 2026-11-21
+
+### Added
+
+- core: port orchestration modules from nexus for issue 7527
+
+### Changed
+
+- Implement Issue #7527
+
+### Fixed
+
+- repair: drop out-of-scope conftest; colocate orchestration_env fixture (#7527)
+
 ## 0.3.0 - 2026-11-21
 
 ### Added
