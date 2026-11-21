@@ -142,7 +142,7 @@ Task `1` ends in `state: DONE`.
 
 **Owners** (`model.OwnerType`): `HUMAN`, `AI`, `EXTERNAL`.
 
-**External nodes** wait on an outside condition instead of an executor or a human reply. During `tick`, tasksmith probes DAG nodes that are `state: READY` and `owner: EXTERNAL` once `check_at` has passed.
+**External nodes** wait on an outside condition instead of an executor or a human reply. During `tick`, tasksmith probes nodes that are `flow: dag`, `state: READY`, and `owner: EXTERNAL` once `check_at` has passed.
 
 - **Built-in probes** (`external.BUILTIN_PROBES`): `time` marks the node `DONE` when due; the `check_params` key `text` becomes the announcement body. `file_exists` completes when `check_params.path` exists (`~` is expanded).
 - **Host probes**: `Settings(probes={"name": probe})` where `probe(task: dict, params: dict[str, str]) -> ProbeResult`. `ProbeResult.status` is `done` (complete), `continue` (poll again), or `speak` (announce `report`, then poll again). Names in `Settings.probes` override built-ins with the same name (`external.resolve_probe`).
@@ -208,9 +208,9 @@ python -m tasksmith [--root DIR] [--queue-dir DIR] [--route ENGINE[:MODEL]]... C
 | `reconcile` | Scan tasks and report ready, review, waiting human, blocked, and drift buckets. |
 | `tick` | Advance the pipeline (enqueue AI work, request humans, run EXTERNAL probes). **Requires `--route`.** `--max-external` (default 3) caps probes per tick. |
 | `external add` | Create an EXTERNAL task. Requires `--title` and `--check`; exactly one of `--at ISO` or `--in MINUTES`; optional `--every`, `--max` (`check_max`, default 5), `--window`, repeated `--param key=value`, `--report-to`, `--project`. Prints the new task id. |
-| `todo candidates` | List open unmarked lines in `todo.md` (JSON). |
+| `todo candidates` | List open unmarked lines in `todo.md` (`PATH`, JSON). |
 | `todo register` | Register lines as tasks (`PATH --decisions FILE`, JSON result). |
-| `todo drift` | Report todo vs task drift (JSON; no writes). |
+| `todo drift` | Report todo vs task drift (`PATH`, JSON; no writes). |
 | `section` | Assign section ids from host rules (`--max` default 200). |
 | `adopt` | Adopt store completion flags into pipeline state. |
 | `finish-node` | Apply a job result to a task (`task_gid --result PATH --meta-digest DIGEST`). |
