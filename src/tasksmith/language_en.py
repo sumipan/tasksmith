@@ -18,8 +18,8 @@ _HEADINGS = {
 }
 
 _MESSAGES = {
-    "adopt.done_detail": 'Adopted DONE state because the task was marked complete in Asana',
-    "adopt.reopen_detail": 'Adopted state because the task was reopened as incomplete in Asana',
+    "adopt.done_detail": 'Adopted DONE state because the task was marked complete in the task store',
+    "adopt.reopen_detail": 'Adopted state because the task was reopened as incomplete in the task store',
     "body_format.checklist_empty": 'Not started',
     "common.note_suffix": '({note})',
     "control_plane.gate_violation": 'check_design_doc violations; READY -> REVIEW:\n{listing}',
@@ -143,12 +143,12 @@ _MESSAGES = {
         '{verb}: AI → dag {dag_count} / HUMAN → personal {personal_count} '
         '(READY restored {restored_count}), skipped {skipped_count}'
     ),
-    "remind.escalated": 'Reminder: Asana task "{name}" hit the reminder cap and moved to REVIEW.',
+    "remind.escalated": 'Reminder: task "{name}" hit the reminder cap and moved to REVIEW.',
     "remind.option_a": 'A: handle today',
     "remind.option_b": 'B: defer to {b_date}',
     "remind.option_c": 'C: defer to {c_date}',
     "remind.option_d": 'D: withdraw',
-    "remind.waiting": 'Reminder: waiting for confirmation on Asana task "{name}".',
+    "remind.waiting": 'Reminder: waiting for confirmation on task "{name}".',
     "request_human.detail_with_link": '{detail}\n\nInbox: {permalink}',
     "request_human.detail_with_options": '{detail}\n\nrequest: {exec_id}\nChoices: ',
     "request_review.batch.skip_cap": 'skip review: review_daily_cap={daily_cap} reached ({already_today} today)',
