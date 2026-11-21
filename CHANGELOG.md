@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.6.1 - 2026-11-21
+
+### Changed
+
+- deps: pin ghdag to v0.152.2
+
 ## 0.6.0 - 2026-11-21
 
 ### Added
