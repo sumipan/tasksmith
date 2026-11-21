@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tasksmith"
-version = "0.5.0"
-description = "Task orchestration storage layer with a pluggable store and local file backend"
+version = "0.5.1"
+description = "A coordinator that moves work forward when humans and AI agents are nodes in the same task DAG"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12"
