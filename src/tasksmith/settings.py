@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from tasksmith.sections import SectionsConfig
@@ -33,6 +33,7 @@ class Settings:
     review_daily_cap: int = 3
     quiet_hours: tuple[str, str] | None = None
     digest_at: str | None = None
+    probes: Mapping[str, Any] = field(default_factory=dict)
 
 
 def settings() -> Settings:

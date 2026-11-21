@@ -78,6 +78,7 @@ class ReconcileResult:
     overdue: list[ReconcileNode]
     unmanaged: list[ReconcileNode]
     elapsed_seconds: float
+    waiting_external: list[ReconcileNode] = field(default_factory=list)
     review: list[ReconcileNode] = field(default_factory=list)
     completable_parents: list[ReconcileNode] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
@@ -245,6 +246,7 @@ def _empty_reconcile(elapsed: float) -> ReconcileResult:
     return ReconcileResult(
         ready=[],
         waiting_human=[],
+        waiting_external=[],
         blocked=[],
         drift=[],
         overdue=[],
@@ -368,6 +370,7 @@ def reconcile(
             "ready": [],
             "review": [],
             "waiting_human": [],
+            "waiting_external": [],
             "blocked": [],
             "drift": [],
             "overdue": [],
@@ -456,6 +459,18 @@ def reconcile(
                     node(
                         "ready",
                         language().messages["reconcile.ready"].format(owner=owner),
+                    )
+                )
+                continue
+
+            if (
+                state == PipelineState.READY.value
+                and owner == OwnerType.EXTERNAL.value
+            ):
+                categorized["waiting_external"].append(
+                    node(
+                        "waiting_external",
+                        language().messages["reconcile.waiting_external"],
                     )
                 )
                 continue
@@ -654,6 +669,7 @@ def reconcile(
         return ReconcileResult(
             ready=categorized["ready"],
             waiting_human=categorized["waiting_human"],
+            waiting_external=categorized["waiting_external"],
             blocked=categorized["blocked"],
             drift=categorized["drift"],
             overdue=categorized["overdue"],

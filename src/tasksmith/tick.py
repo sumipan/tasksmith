@@ -26,6 +26,14 @@ from tasksmith.body import (
 )
 from tasksmith.events import EventKind, EventSink, NullSink, TasksmithEvent, first_line, safe_emit, utc_now_iso
 from tasksmith.execution import executor
+from tasksmith.external import (
+    format_check_at,
+    in_window,
+    next_window_start,
+    parse_check_at,
+    parse_check_params,
+    resolve_probe,
+)
 from tasksmith.gates import check_design_doc, format_violations_comment
 from tasksmith.language import language
 from tasksmith.model import OwnerType, PipelineState
@@ -280,6 +288,7 @@ def _reconcile_counts(result: ReconcileResult) -> dict[str, int]:
         "ready": len(result.ready),
         "review": len(result.review),
         "waiting_human": len(result.waiting_human),
+        "waiting_external": len(result.waiting_external),
         "blocked": len(result.blocked),
         "drift": len(result.drift),
         "overdue": len(result.overdue),
@@ -366,6 +375,211 @@ def _design_doc_gate(
             detail=detail,
         )
     return list(violations)
+
+
+def _meta_int(sections: dict[str, str], key: str, *, default: int = 0) -> int:
+    raw = parse_meta_field(sections, key)
+    if raw is None or not str(raw).strip():
+        return default
+    try:
+        return int(str(raw).strip())
+    except ValueError:
+        return default
+
+
+def _notify_external(name: str, text: str, report_to: str | None, messages: list[str]) -> None:
+    from tasksmith.runtime import human_channel
+
+    try:
+        ch = human_channel()
+        if report_to:
+            ch.follow_up(report_to, text)
+        else:
+            ch.announce(text)
+    except Exception as exc:
+        messages.append(f"external notify failed ({name}): {exc}")
+
+
+def _run_external_probes(
+    result: ReconcileResult,
+    *,
+    max_external: int,
+    now_dt: datetime,
+    dry_run: bool,
+    in_quiet: bool,
+    channel_available: bool,
+    messages: list[str],
+    counts: dict[str, int],
+) -> None:
+    waiting = [n for n in result.waiting_external if n.flow_type == "dag"]
+    gated: list[ReconcileNode] = []
+    for node in waiting:
+        violations = _design_doc_gate(
+            node.task_gid,
+            body=node.body,
+            actor="tasksmith-tick",
+            dry_run=dry_run,
+        )
+        if violations:
+            messages.append(
+                f"design_doc_gate: {node.task_gid} → REVIEW ({len(violations)} violations)"
+            )
+            continue
+        gated.append(node)
+
+    if in_quiet:
+        if gated:
+            messages.append(language().messages["tick.skip_external_quiet"])
+        return
+    if not dry_run and not channel_available:
+        if gated:
+            messages.append("skip external: human_channel not installed")
+        return
+
+    due: list[tuple[datetime, ReconcileNode]] = []
+    for node in gated:
+        body = node.body
+        if not isinstance(body, str):
+            task = task_store().get_task(node.task_gid)
+            body = task.get("body") if isinstance(task.get("body"), str) else None
+        if not isinstance(body, str):
+            continue
+        sections = parse_sections(body)
+        if sections is None:
+            continue
+        raw_at = parse_meta_field(sections, "check_at")
+        if not raw_at:
+            continue
+        try:
+            check_at = parse_check_at(raw_at)
+        except ValueError:
+            continue
+        if check_at <= now_dt:
+            due.append((check_at, node))
+
+    due.sort(key=lambda item: item[0])
+    selected = [node for _, node in due[:max_external]]
+    texts = language().messages
+    checked = 0
+
+    for node in selected:
+        if dry_run:
+            messages.append(f"dry-run external: gid={node.task_gid}")
+            continue
+
+        task = task_store().get_task(node.task_gid)
+        body = task.get("body")
+        if not isinstance(body, str):
+            continue
+        sections = parse_sections(body)
+        if sections is None:
+            continue
+        window = parse_meta_field(sections, "check_window")
+        if window:
+            try:
+                if not in_window(now_dt, window):
+                    next_at = next_window_start(now_dt, window)
+                    body = update_meta_field(
+                        body, "check_at", format_check_at(next_at), create=True
+                    )
+                    task_store().update_task(node.task_gid, body=body)
+                    messages.append(
+                        f"external gid={node.task_gid} deferred"
+                    )
+                    continue
+            except ValueError:
+                pass
+
+        check_name = parse_meta_field(sections, "check") or ""
+        probe = resolve_probe(check_name)
+        params = parse_check_params(sections)
+        check_every = _meta_int(sections, "check_every", default=60)
+        check_max = _meta_int(sections, "check_max", default=5)
+        checks = _meta_int(sections, "_checks", default=0)
+        report_to = parse_meta_field(sections, "report_to")
+
+        outcome = "deferred"
+        try:
+            if probe is None:
+                raise RuntimeError("probe not found")
+            probe_result = probe(task, params)
+            status = (probe_result.status or "").strip().lower()
+            report = (probe_result.report or "").strip()
+
+            if status == "done":
+                msg = report or texts["external.done"].format(name=node.name)
+                _notify_external(node.name, msg, report_to, messages)
+                transition_task(
+                    node.task_gid,
+                    state=PipelineState.DONE,
+                    actor="tasksmith-tick",
+                    execution_id=_execution_id("external-done", node.task_gid),
+                    detail=report or msg,
+                )
+                outcome = "done"
+            elif status in ("speak", "continue"):
+                if status == "speak" and report:
+                    _notify_external(node.name, report, report_to, messages)
+                checks += 1
+                body = update_meta_field(body, "_checks", str(checks), create=True)
+                if checks >= check_max:
+                    exhausted = texts["external.exhausted"].format(
+                        name=node.name, count=checks
+                    )
+                    _notify_external(node.name, exhausted, report_to, messages)
+                    task_store().update_task(node.task_gid, body=body)
+                    transition_task(
+                        node.task_gid,
+                        state=PipelineState.BLOCKED,
+                        actor="tasksmith-tick",
+                        execution_id=_execution_id("external-blocked", node.task_gid),
+                        detail=exhausted,
+                    )
+                    outcome = "blocked"
+                else:
+                    next_at = now_dt + timedelta(minutes=check_every)
+                    body = update_meta_field(
+                        body, "check_at", format_check_at(next_at), create=True
+                    )
+                    task_store().update_task(node.task_gid, body=body)
+                    outcome = status
+            else:
+                raise ValueError(f"unexpected probe status: {status!r}")
+        except Exception as exc:
+            err_line = str(exc).splitlines()[0] if str(exc) else type(exc).__name__
+            task_store().add_comment(
+                node.task_gid,
+                texts["external.probe_error"].format(error=err_line),
+            )
+            checks += 1
+            body = update_meta_field(body, "_checks", str(checks), create=True)
+            if checks >= check_max:
+                exhausted = texts["external.exhausted"].format(
+                    name=node.name, count=checks
+                )
+                _notify_external(node.name, exhausted, report_to, messages)
+                task_store().update_task(node.task_gid, body=body)
+                transition_task(
+                    node.task_gid,
+                    state=PipelineState.BLOCKED,
+                    actor="tasksmith-tick",
+                    execution_id=_execution_id("external-blocked", node.task_gid),
+                    detail=exhausted,
+                )
+                outcome = "blocked"
+            else:
+                next_at = now_dt + timedelta(minutes=check_every)
+                body = update_meta_field(
+                    body, "check_at", format_check_at(next_at), create=True
+                )
+                task_store().update_task(node.task_gid, body=body)
+                outcome = "continue"
+
+        checked += 1
+        messages.append(f"external gid={node.task_gid} {outcome}")
+
+    if checked:
+        counts["external_checked"] = counts.get("external_checked", 0) + checked
 
 
 @dataclass(frozen=True)
@@ -631,6 +845,7 @@ def tick(
     max_rollup: int = 5,
     max_adopt: int = 10,
     max_section: int = 5,
+    max_external: int = 3,
     metrics_path: Path | None = None,
     digest_state_path: Path | None = None,
     now: datetime | None = None,
@@ -666,6 +881,7 @@ def tick(
                 max_rollup=max_rollup,
                 max_adopt=max_adopt,
                 max_section=max_section,
+                max_external=max_external,
                 metrics_path=metrics_path,
                 digest_state_path=digest_state_path,
                 now=now,
@@ -698,6 +914,7 @@ def _tick_body(
     max_rollup: int = 5,
     max_adopt: int = 10,
     max_section: int = 5,
+    max_external: int = 3,
     metrics_path: Path | None = None,
     digest_state_path: Path | None = None,
     now: datetime | None = None,
@@ -727,6 +944,8 @@ def _tick_body(
         raise ValueError("--max-adopt must be 0 or greater")
     if max_section < 0:
         raise ValueError("--max-section must be 0 or greater")
+    if max_external < 0:
+        raise ValueError("--max-external must be 0 or greater")
     result = reconcile(project_gid)
     if on_reconcile is not None:
         try:
@@ -816,6 +1035,17 @@ def _tick_body(
             )
             continue
         gated_ready.append(node)
+
+    _run_external_probes(
+        result,
+        max_external=max_external,
+        now_dt=now_dt,
+        dry_run=dry_run,
+        in_quiet=in_quiet,
+        channel_available=channel_available,
+        messages=messages,
+        counts=counts,
+    )
 
     # right after design_doc_gate, before request_review: fill in the body section: and move lanes
     if max_section > 0 and result.unsectioned:

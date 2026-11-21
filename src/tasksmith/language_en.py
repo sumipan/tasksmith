@@ -122,6 +122,13 @@ _MESSAGES = {
     "reconcile.overdue": 'Overdue due_on={due_s}',
     "reconcile.overdue_unmanaged": 'Overdue due_on={due_s} (unmanaged)',
     "reconcile.ready": 'Dependencies satisfied; PipelineState=READY; OwnerType={owner}',
+    "reconcile.waiting_external": (
+        'Dependencies satisfied; waiting on external probe '
+        '(PipelineState=READY; OwnerType=EXTERNAL)'
+    ),
+    "external.done": 'External task {name} completed',
+    "external.exhausted": 'External task {name} exhausted after {count} checks',
+    "external.probe_error": 'External probe error: {error}',
     "reconcile.reason_separator": ' / ',
     "reconcile.review": 'PipelineState=REVIEW; OwnerType={owner}',
     "reconcile.section_default_unsynced": 'Body section: {section_id} but default lane on store (sync not run)',
@@ -171,6 +178,7 @@ _MESSAGES = {
     "tick.skip_human_cap": 'skip human: WAITING_HUMAN={waiting_count} at cap --max-human={max_human}',
     "tick.skip_human_no_channel": 'skip human: request_channel_id not set',
     "tick.skip_review_digest_quiet": 'skip review/digest: quiet_hours',
+    "tick.skip_external_quiet": 'skip external probes: quiet_hours',
     "tick.unsectioned_count": 'unsectioned: {count} (section unset or still on default lane)',
 }
 _VIOLATIONS = {
@@ -229,6 +237,10 @@ _VIOLATIONS = {
     "design_doc.executor_not_found": "Executor skill is not set",
     "design_doc.executor_not_found.bad_format": "AI nodes must set executor as skill:<name>.",
     "design_doc.executor_not_found.missing_skill": "executor skill:{skill_name} does not exist under skills/.",
+    "design_doc.external_check_unknown": "External check probe is unknown",
+    "design_doc.external_check_unknown.detail": "check must name a registered external probe.",
+    "design_doc.external_meta_invalid": "External check metadata is invalid",
+    "design_doc.external_meta_invalid.detail": "Invalid external metadata field: {field}.",
     "design_doc.format_invalid": "Body format is invalid",
     "design_doc.format_invalid.detail": (
         "Section order does not match {current}, or the format marker is not {current}."

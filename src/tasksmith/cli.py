@@ -11,12 +11,13 @@ from dataclasses import asdict
 from pathlib import Path
 
 from tasksmith.execution import GhdagExecutor, GhdagThinker, set_executor, set_thinker
+from tasksmith.external import new_external_body, parse_check_at
 from tasksmith.file_channel import FileChannel
 from tasksmith.human import record_human_reply, request_human
 from tasksmith.local import LocalTaskStore
 from tasksmith.reconcile import ReconcileResult, _load_sections_config, reconcile
 from tasksmith.runtime import set_human_channel, set_task_store, task_store
-from tasksmith.settings import Settings, set_settings
+from tasksmith.settings import Settings, set_settings, settings
 from tasksmith.store import TaskStoreError
 from tasksmith.tick import (
     SectionAssignment,
@@ -180,6 +181,7 @@ def main(argv: list[str] | None = None) -> int:
             "record-human-reply",
             "metrics",
             "todo",
+            "external",
         ),
     )
     parser.add_argument("task_gid", nargs="?", default=None)
@@ -195,6 +197,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-rollup", dest="max_rollup", type=int, default=5)
     parser.add_argument("--max-adopt", dest="max_adopt", type=int, default=10)
     parser.add_argument("--max-section", dest="max_section", type=int, default=5)
+    parser.add_argument("--max-external", dest="max_external", type=int, default=3)
+    parser.add_argument("--title", default=None)
+    parser.add_argument("--check", dest="external_check", default=None)
+    parser.add_argument("--at", dest="at_iso", default=None)
+    parser.add_argument("--in", dest="in_minutes", type=int, default=None)
+    parser.add_argument("--every", dest="check_every", type=int, default=60)
+    parser.add_argument("--window", dest="check_window", default=None)
+    parser.add_argument("--param", action="append", default=[])
+    parser.add_argument("--report-to", dest="report_to", default=None)
     parser.add_argument("--message", default=None)
     parser.add_argument("--ref", default=None)
     parser.add_argument("--decisions", default=None, help="JSON file of registration decisions (todo register)")
@@ -206,6 +217,11 @@ def main(argv: list[str] | None = None) -> int:
             args.max_running = 200
         elif args.max_running < 0:
             parser.error("--max must be 0 or greater")
+    elif args.command == "external":
+        if args.max_running is None:
+            args.max_running = 5
+        elif args.max_running < 1:
+            parser.error("--max must be at least 1")
     elif args.max_running is None:
         args.max_running = 1
 
@@ -264,6 +280,54 @@ def main(argv: list[str] | None = None) -> int:
                 store=task_store(),
             )
             print(json.dumps(asdict(result), ensure_ascii=False, indent=2 if args.json else None))
+            return 0
+
+        if args.command == "external":
+            if args.task_gid != "add":
+                print("error: external requires add", file=sys.stderr)
+                return 2
+            if not args.title or not args.external_check:
+                print("error: external add requires --title and --check", file=sys.stderr)
+                return 2
+            if (args.at_iso is None) == (args.in_minutes is None):
+                print("error: external add requires exactly one of --at or --in", file=sys.stderr)
+                return 2
+            params: dict[str, str] = {}
+            for spec in args.param:
+                if "=" not in spec:
+                    print("error: --param requires key=value", file=sys.stderr)
+                    return 2
+                key, val = spec.split("=", 1)
+                params[key] = val
+            st = settings()
+            from datetime import datetime, timedelta
+            from zoneinfo import ZoneInfo
+
+            tz = ZoneInfo(st.timezone)
+            if args.in_minutes is not None:
+                check_at = datetime.now(tz) + timedelta(minutes=args.in_minutes)
+            else:
+                try:
+                    check_at = parse_check_at(args.at_iso)
+                except ValueError as exc:
+                    print(f"error: {exc}", file=sys.stderr)
+                    return 2
+            body = new_external_body(
+                objective=args.title,
+                check=args.external_check,
+                check_at=check_at,
+                check_every=args.check_every,
+                check_max=args.max_running,
+                check_window=args.check_window,
+                params=params or None,
+                report_to=args.report_to,
+            )
+            gid = task_store().create_task(
+                args.title,
+                body=body,
+                project_gid=args.project_gid,
+            )
+            print(gid)
             return 0
 
         if args.command == "reconcile":
@@ -329,6 +393,7 @@ def main(argv: list[str] | None = None) -> int:
                 max_rollup=args.max_rollup,
                 max_adopt=args.max_adopt,
                 max_section=args.max_section,
+                max_external=args.max_external,
             )
             if args.json:
                 print(

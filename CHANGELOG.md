@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.7.0 - 2026-11-21
+
+### Added
+
+- external: advance READY nodes that wait on external probes
+
 ## 0.6.1 - 2026-11-21
 
 ### Changed
