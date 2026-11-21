@@ -85,7 +85,7 @@ def _default_metrics_path() -> Path:
 
 
 def _append_metrics(record: dict[str, Any], *, metrics_path: Path | None = None) -> None:
-    """Append one tasksmith JSONL line. Asana state is not rolled back on failure."""
+    """Append one tasksmith JSONL line. Store state is not rolled back on failure."""
     path = metrics_path if metrics_path is not None else _default_metrics_path()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -308,7 +308,7 @@ def _design_doc_gate(
 ) -> list[Any]:
     """Deterministic gate when selecting READY. With violations, move to REVIEW and return the violations.
 
-    A body of an old version is aligned to ``tasksmith/v1`` by ``AsanaTaskStore`` when it
+    A body of an old version is aligned to ``tasksmith/v1`` by the store when it
     reads it, so it is not upgraded here; with violations it falls to REVIEW.
 
     If ``body`` is a str it is evaluated as the body already fetched by reconcile and
@@ -445,7 +445,7 @@ def _decide_section(
     decided: dict[str, str | None],
 ) -> tuple[str, str | None, bool, bool]:
     """Decide (outcome, section_id, whether to write the body, whether to move) for one item (deterministic, no LLM)."""
-    from tools.asana.sections import classify_section
+    from tasksmith.sections import classify_section
 
     secs = parse_sections(notes) if notes else None
     body_section = parse_meta_field(secs, "section") if secs else None

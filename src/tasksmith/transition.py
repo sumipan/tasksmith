@@ -98,7 +98,7 @@ def transition_task(
         except Exception:
             import logging
             logging.getLogger(__name__).warning(
-                "[asana] rollup_parent_of_task failed after DONE transition task=%s",
+                "[tasksmith] rollup_parent_of_task failed after DONE transition task=%s",
                 task_gid, exc_info=True,
             )
     return target_state
