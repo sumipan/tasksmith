@@ -10,7 +10,7 @@ readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12"
 dependencies = [
-  "ghdag @ git+https://github.com/sumipan/ghdag.git@v0.152.2",
+  "ghdag>=0.152.2",
 ]
 
 [project.optional-dependencies]
