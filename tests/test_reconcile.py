@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
+import pytest
+
+from tasksmith import LocalTaskStore
 from tasksmith.body import build_controlled_notes, update_meta_field
+from tasksmith.execution import set_executor
+from tasksmith.runtime import set_task_store
+from tasksmith.settings import Settings, set_settings
 from tasksmith.model import OwnerType, PipelineState
 from tasksmith.reconcile import reconcile
 from tasksmith.transition import transition_task
@@ -19,6 +25,27 @@ def _ready_human_body(objective: str = "Work", *, depends: str | None = None) ->
     if depends:
         body = update_meta_field(body, "depends_on", depends, create=True)
     return body
+
+
+@pytest.fixture
+def orchestration_env(tmp_path, monkeypatch):
+    """Install a local store and settings; clear overrides after the test."""
+    store_root = tmp_path / "store"
+    state_dir = tmp_path / "state"
+    store = LocalTaskStore(store_root)
+    set_task_store(store)
+    set_settings(
+        Settings(
+            state_dir=state_dir,
+            project_id=None,
+            executor_exists=lambda name: name == "demo",
+        )
+    )
+    monkeypatch.delenv("TASKSMITH_ROOT", raising=False)
+    yield store
+    set_task_store(None)
+    set_settings(None)
+    set_executor(None)
 
 
 def test_reconcile_respects_depends_on_chain(orchestration_env) -> None:
