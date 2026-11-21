@@ -34,11 +34,10 @@ def test_check_design_doc_passes_for_concrete_acceptance_with_location() -> None
         owner=OwnerType.HUMAN,
         state=PipelineState.READY,
         flow="dag",
-        acceptance=["a"],
+        acceptance=["The report is saved at docs/report.md"],
     )
     sections = parse_sections(body)
     assert sections is not None
-    sections["acceptance"] = "- [ ] The report is saved at docs/report.md"
     violations = check_design_doc(sections, body=body)
     forbidden = {"design_doc.ac_count", "design_doc.ac_vague_word", "design_doc.format_invalid"}
     assert forbidden.isdisjoint({v.rule_id for v in violations})
