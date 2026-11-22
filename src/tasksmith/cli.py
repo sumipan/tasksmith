@@ -14,11 +14,13 @@ from tasksmith.execution import GhdagExecutor, GhdagThinker, set_executor, set_t
 from tasksmith.external import new_external_body, parse_check_at
 from tasksmith.file_channel import FileChannel
 from tasksmith.human import record_human_reply, request_human
+from tasksmith.intake import register_items
 from tasksmith.local import LocalTaskStore
 from tasksmith.reconcile import ReconcileResult, _load_sections_config, reconcile
 from tasksmith.runtime import set_human_channel, set_task_store, task_store
 from tasksmith.settings import Settings, set_settings, settings
 from tasksmith.store import TaskStoreError
+from tasksmith.tags import summarize
 from tasksmith.tick import (
     SectionAssignment,
     _section_counts,
@@ -30,9 +32,6 @@ from tasksmith.tick import (
     recover,
     tick,
 )
-from tasksmith.todo import candidates as todo_candidates
-from tasksmith.todo import find_drift as todo_find_drift
-from tasksmith.todo import register as todo_register
 
 __all__ = ["main"]
 
@@ -180,12 +179,12 @@ def main(argv: list[str] | None = None) -> int:
             "request-human",
             "record-human-reply",
             "metrics",
-            "todo",
+            "intake",
+            "tags",
             "external",
         ),
     )
     parser.add_argument("task_gid", nargs="?", default=None)
-    parser.add_argument("todo_path", nargs="?", default=None)
     parser.add_argument("--result", dest="result_path", default=None)
     parser.add_argument("--meta-digest", dest="meta_digest", default=None)
     parser.add_argument("--project", dest="project_gid", default=None)
@@ -208,7 +207,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--report-to", dest="report_to", default=None)
     parser.add_argument("--message", default=None)
     parser.add_argument("--ref", default=None)
-    parser.add_argument("--decisions", default=None, help="JSON file of registration decisions (todo register)")
+    parser.add_argument("--items", default=None, help="JSON file of intake items (intake)")
+    parser.add_argument("--reference", default=None, help="reference text for intake (intake)")
+    parser.add_argument("--tag", action="append", default=None, help="tag name (intake; repeatable)")
+    parser.add_argument("--finished-since", dest="finished_since", default=None)
+    parser.add_argument("--finished-until", dest="finished_until", default=None)
     parser.add_argument("--days", type=int, default=7)
     args = parser.parse_args(argv)
 
@@ -250,36 +253,80 @@ def main(argv: list[str] | None = None) -> int:
                 print(format_metrics_text(summary))
             return 0
 
-        if args.command == "todo":
-            action = args.task_gid
-            if action not in ("candidates", "register", "drift"):
-                print("error: todo requires candidates, register, or drift", file=sys.stderr)
+        if args.command == "intake":
+            if not args.items or not args.tag:
+                print("error: intake requires --items and at least one --tag", file=sys.stderr)
                 return 2
-            if not args.todo_path:
-                print("error: todo requires a todo.md path", file=sys.stderr)
-                return 2
-            path = Path(args.todo_path)
-            if action == "register" and not args.decisions:
-                print("error: todo register requires --decisions", file=sys.stderr)
-                return 2
-            if action == "candidates":
-                text = path.read_text(encoding="utf-8") if path.exists() else ""
-                payload = todo_candidates(text)
-                print(json.dumps(payload, ensure_ascii=False, indent=2 if args.json else None))
-                return 0
-            if action == "drift":
-                text = path.read_text(encoding="utf-8") if path.exists() else ""
-                payload = todo_find_drift(text, task_store())
-                print(json.dumps(payload, ensure_ascii=False, indent=2 if args.json else None))
-                return 0
-            decisions = json.loads(Path(args.decisions).read_text(encoding="utf-8"))
-            result = todo_register(
-                path,
-                decisions,
+            items = json.loads(Path(args.items).read_text(encoding="utf-8"))
+            result = register_items(
+                items,
                 project_id=args.project_gid,
+                tags=args.tag,
                 store=task_store(),
+                reference=args.reference,
             )
             print(json.dumps(asdict(result), ensure_ascii=False, indent=2 if args.json else None))
+            return 0 if not result.failed else 1
+
+        if args.command == "tags":
+            from datetime import datetime, timezone
+
+            groups = summarize(task_store().list_tasks(args.project_gid))
+            if args.finished_since is not None or args.finished_until is not None:
+
+                def _parse_instant(raw: str) -> datetime:
+                    text = raw.strip()
+                    if text.endswith("Z"):
+                        text = f"{text[:-1]}+00:00"
+                    dt = datetime.fromisoformat(text)
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    return dt
+
+                try:
+                    since = (
+                        _parse_instant(args.finished_since)
+                        if args.finished_since is not None
+                        else None
+                    )
+                    until = (
+                        _parse_instant(args.finished_until)
+                        if args.finished_until is not None
+                        else None
+                    )
+                except ValueError as exc:
+                    print(f"error: {exc}", file=sys.stderr)
+                    return 2
+                filtered: list = []
+                for group in groups:
+                    if not group.finished or group.finished_at is None:
+                        continue
+                    try:
+                        at = _parse_instant(group.finished_at)
+                    except ValueError:
+                        print(f"error: invalid finished_at on tag {group.tag!r}", file=sys.stderr)
+                        return 2
+                    if since is not None and at < since:
+                        continue
+                    if until is not None and at >= until:
+                        continue
+                    filtered.append(group)
+                groups = filtered
+
+            if args.json:
+                print(
+                    json.dumps(
+                        [asdict(g) for g in groups],
+                        ensure_ascii=False,
+                        indent=2,
+                    )
+                )
+            else:
+                for group in groups:
+                    print(
+                        f"{group.tag} open={len(group.open)} "
+                        f"done={len(group.done)} finished={group.finished}"
+                    )
             return 0
 
         if args.command == "external":

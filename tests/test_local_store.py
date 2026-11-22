@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 
 import pytest
 
@@ -221,6 +222,24 @@ def test_legacy_html_notes_is_read_as_body(tmp_path) -> None:
     store = LocalTaskStore(tmp_path)
     assert store.get_task("1")["body"] == "<body>x</body>"
     assert task_path.read_text(encoding="utf-8") == json.dumps(legacy, indent=2) + "\n"
+
+
+def test_completed_at_is_set_once_and_cleared(tmp_path) -> None:
+    """Refs: #7778 AC5."""
+    store = LocalTaskStore(tmp_path)
+    task_id = store.create_task("T", project_gid="p1")
+    assert store.get_task(task_id)["completed_at"] is None
+
+    store.update_task(task_id, completed=True)
+    at = store.get_task(task_id)["completed_at"]
+    assert at is not None
+    datetime.fromisoformat(at.replace("Z", "+00:00"))
+
+    store.update_task(task_id, completed=True)
+    assert store.get_task(task_id)["completed_at"] == at
+
+    store.update_task(task_id, completed=False)
+    assert store.get_task(task_id)["completed_at"] is None
 
 
 def test_legacy_notes_is_read_as_body_when_html_notes_is_empty(tmp_path) -> None:

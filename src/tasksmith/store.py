@@ -29,6 +29,7 @@ class TaskStore(Protocol):
     - ``permalink_url`` (``str``)
     - ``parent`` (``{"gid": str} | None``)
     - ``section_gid`` (``str | None``)
+    - ``completed_at`` (``str | None``): ISO 8601 UTC when completed; ``None`` if incomplete
     - ``subtasks`` (``list[dict]``): direct children only, sorted by numeric ``gid``.
       Each child uses the same keys except ``subtasks`` is omitted on children.
 
@@ -40,7 +41,10 @@ class TaskStore(Protocol):
         """Return one task by id."""
 
     def list_tasks(self, project_gid: str | None = None) -> list[dict]:
-        """Return top-level tasks for a project (or all projects when omitted)."""
+        """Return top-level tasks for a project (or all projects when omitted).
+
+        Includes completed tasks; each row exposes ``completed_at`` when completed.
+        """
 
     def get_task_stories(self, task_gid: str) -> list[dict]:
         """Return comment and system stories in append order."""

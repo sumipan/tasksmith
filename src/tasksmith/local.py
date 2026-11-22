@@ -140,7 +140,13 @@ class LocalTaskStore:
             if section_gid is not None:
                 raw["section"] = section_gid
             if completed is not None:
-                raw["completed"] = completed
+                if completed:
+                    if not raw.get("completed"):
+                        raw["completed_at"] = _utcnow()
+                    raw["completed"] = True
+                else:
+                    raw["completed"] = False
+                    raw["completed_at"] = None
             raw["modified_at"] = _utcnow()
             self._write_raw_task(task_gid, raw)
             if description_changed:
@@ -173,6 +179,7 @@ class LocalTaskStore:
                 "name": name,
                 "body": body if body is not None else "",
                 "completed": False,
+                "completed_at": None,
                 "due_on": due_on,
                 "project": project_gid,
                 "section": section_gid,
@@ -188,10 +195,17 @@ class LocalTaskStore:
         parent = raw.get("parent")
         parent_pub = {"gid": parent} if parent else None
         path = self._task_path(task_gid)
+        completed = bool(raw.get("completed"))
+        completed_at: str | None
+        if completed:
+            completed_at = raw.get("completed_at") or raw.get("modified_at")
+        else:
+            completed_at = None
         public: dict[str, Any] = {
             "gid": task_gid,
             "name": raw.get("name", ""),
-            "completed": bool(raw.get("completed")),
+            "completed": completed,
+            "completed_at": completed_at,
             "due_on": raw.get("due_on"),
             "body": _raw_body(raw),
             "permalink_url": path.resolve().as_uri(),
