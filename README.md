@@ -13,7 +13,7 @@ Python 3.12 or newer. The only runtime dependency is `ghdag`. `pyproject.toml` d
 
 ## Quick start
 
-Use an empty directory as `--root` and run the steps below in order. Task creation is short Python (there is no CLI command to create tasks).
+Use an empty directory as `--root` and run the steps below in order. Task creation is short Python, or use `intake` / `external add` from the CLI.
 
 ```python
 from pathlib import Path
@@ -137,6 +137,42 @@ hello
 
 Task `1` ends in `state: DONE`.
 
+**Intake demo** — use another empty directory. No runner or LLM is required.
+
+```bash
+mkdir -p /tmp/tasksmith-intake
+cat > /tmp/tasksmith-intake/items.json <<'EOF'
+[
+  {"text": "Draft the agenda"},
+  {"text": "Summarize the notes", "owner": "AI"}
+]
+EOF
+```
+
+```bash
+python -m tasksmith --root /tmp/tasksmith-intake intake --items /tmp/tasksmith-intake/items.json --project p --tag "2026-11-20 weekly"
+```
+
+```
+{"created": ["1", "2"], "skipped": [], "failed": []}
+```
+
+```bash
+python -m tasksmith --root /tmp/tasksmith-intake tags --project p
+```
+
+```
+2026-11-20 weekly open=2 done=0 finished=False
+```
+
+```bash
+python -m tasksmith --root /tmp/tasksmith-intake intake --items /tmp/tasksmith-intake/items.json --project p --tag "2026-11-20 weekly"
+```
+
+```
+{"created": [], "skipped": [{"text": "Draft the agenda", "reason": "already registered"}, {"text": "Summarize the notes", "reason": "already registered"}], "failed": []}
+```
+
 ## Concepts
 
 **Pipeline states** (`model.PipelineState`): `READY`, `RUNNING`, `WAITING_HUMAN`, `REVIEW`, `DONE`, `BLOCKED`. (`NORMALIZED` is a normalize-step marker, not a state-machine state.)
@@ -151,19 +187,21 @@ Task `1` ends in `state: DONE`.
 - **Scheduling**: Outside `check_window`, `check_at` moves to the next window opening. During `Settings.quiet_hours`, probes are skipped. Each `tick` runs at most `--max-external` nodes (default 3). Non-`done` outcomes and probe errors count as one check; when `_checks` reaches `check_max`, the node becomes `BLOCKED`.
 - **Notifications**: With `report_to`, `HumanChannel.follow_up(report_to, text)`; otherwise `HumanChannel.announce(text)` (the bundled `FileChannel` appends to `.tasks/announcements.md`). Default completion text is `External task <name> completed`; exhaustion is `External task <name> exhausted after <n> checks` (`language_en`).
 
-**Body shape**: eight sections — `Objective`, `Deliverables`, `Procedure and constraints`, `Acceptance criteria`, `Open decisions`, `Working draft`, `References`, `Control metadata` (headings come from the bundled English pack). In `Control metadata`, common fields include `format: tasksmith/v1`, `state`, `owner`, `flow`, `executor`, `inputs`, `outputs`, and `depends_on`. Fields whose names start with `_` are internal and written by tasksmith. Humans may edit `EDITABLE_SECTIONS` only: `Working draft` and `Acceptance criteria` (`body.EDITABLE_SECTIONS`).
+**Body shape**: eight sections — `Objective`, `Deliverables`, `Procedure and constraints`, `Acceptance criteria`, `Open decisions`, `Working draft`, `References`, `Control metadata` (headings come from the bundled English pack). In `Control metadata`, common fields include `format: tasksmith/v1`, `state`, `owner`, `flow`, `executor`, `tags`, `inputs`, `outputs`, and `depends_on`. Fields whose names start with `_` are internal and written by tasksmith. Humans may edit `EDITABLE_SECTIONS` only: `Working draft` and `Acceptance criteria` (`body.EDITABLE_SECTIONS`).
 
 **Dependencies**: a node is not ready until every task id listed in `depends_on` is `DONE`.
 
-## todo.md
+**Tags** (`tasksmith.tags`): control metadata field `tags` (`- tags: a, b` — comma-separated names; `tasksmith.tags.parse_tags` / `set_tags`). Tags group tasks that came from the same meeting or request. Sections differ from tags: sections are a small set of host-defined lanes with one section per task; tags grow at registration time and a task may carry several. A tag group is **finished** when `tasksmith.tags.summarize` finds at least one completed task and zero incomplete ones among parentless tasks and their direct children sharing that tag; `finished_at` is the maximum `completed_at` among completed tasks in the group.
 
-Tasks are canonical; `todo.md` is a human-facing view.
+## Intake
 
-- **Line shape**: `- [ ] <text>` (open) or `- [x] <text>` (checked). Other lines are ignored.
-- **Mark**: registered lines gain `<!-- task:<id> -->` at the end of the line.
-- **Candidates** (`todo candidates` / `todo.candidates`): open, unmarked lines as a JSON array of `line_id` (first 12 hex chars of SHA-1 of the full line), `text`, and `line_no`.
-- **Register** (`todo register PATH --decisions FILE` / `todo.register`): decisions are `[{"line_id": "...", "register": true|false, "reason": "...", "owner": "AI"|"HUMAN", "section": "..."}]`. Lines with `register: true` create a task in `state: REVIEW` (`HUMAN` uses `flow: personal`, otherwise `flow: dag`; default owner `AI`), stamp the line, and rewrite `todo.md` atomically. Output fields: `registered`, `skipped`, `failed`, `skipped_reasons`, `failures`.
-- **Drift** (`todo drift` / `todo.find_drift`): compare marked lines with tasks; report `task_missing`, `checked_in_todo`, `unchecked_in_todo`, or `text_changed`. **Read-only** — never writes `todo.md` or tasks.
+`tasksmith.intake.register_items` and the CLI `intake` command accept a JSON array of items (`text`; `owner` is `HUMAN` or `AI` (default `HUMAN`); `section`; `register` (default true); `reason`).
+
+Created tasks use `state: REVIEW`; `HUMAN` gets `flow: personal`, `AI` gets `flow: dag`. All specified tags are attached; `--reference` text goes in the `References` section.
+
+Duplicate suppression: among parentless tasks in the same project (including completed ones), if any task with the same `text` already carries one of the given tags, no new task is created. The second item with the same `text` in one call is also skipped (reason `already registered`).
+
+CLI: `intake --items <file> [--project <id>] --tag <name> [--tag ...] [--reference <text>]`. Output is JSON `{"created", "skipped", "failed"}` (indented only with `--json`). Exit code 0 when `failed` is empty, 1 otherwise; 2 when `--items` or any `--tag` is missing.
 
 ## Ports
 
@@ -178,13 +216,15 @@ Four ports define how tasksmith talks to storage, humans, execution, and LLM int
 
 Hosts also call `tasksmith.settings.set_settings(Settings(...))` — including `Settings.probes` for custom EXTERNAL probes (see **External nodes** above) — and may attach `tasksmith.events.EventSink` listeners. The CLI `--root` wires these four ports plus `Settings` with `LocalTaskStore`, `FileChannel`, and the ghdag-backed executor and thinker.
 
+Task dicts from the store include `completed_at` (ISO 8601 UTC, or `None` when incomplete). `list_tasks` returns completed tasks as well.
+
 ## On-disk layout
 
 Under `<root>/.tasks/`:
 
 | Path | Content |
 |------|---------|
-| `tasks/<id>.json` | One task (`gid`, `name`, `body`, `completed`, `due_on`, `project`, `section`, `parent`, `assignee`, `created_at`, `modified_at`, …) |
+| `tasks/<id>.json` | One task (`gid`, `name`, `body`, `completed`, `completed_at`, `due_on`, `project`, `section`, `parent`, `assignee`, `created_at`, `modified_at`, …) |
 | `tasks/<id>.stories.jsonl` | Append-only comment/system stories |
 | `counter` | Last allocated numeric id |
 | `lock` | Exclusive lock file while writers run |
@@ -209,9 +249,8 @@ python -m tasksmith [--root DIR] [--queue-dir DIR] [--route ENGINE[:MODEL]]... C
 | `reconcile` | Scan tasks and report ready, review, waiting human, blocked, and drift buckets. |
 | `tick` | Advance the pipeline (enqueue AI work, request humans, run EXTERNAL probes). **Requires `--route`.** `--max-external` (default 3) caps probes per tick. |
 | `external add` | Create an EXTERNAL task. Requires `--title` and `--check`; exactly one of `--at ISO` or `--in MINUTES`; optional `--every`, `--max` (`check_max`, default 5), `--window`, repeated `--param key=value`, `--report-to`, `--project`. Prints the new task id. |
-| `todo candidates` | List open unmarked lines in `todo.md` (`PATH`, JSON). |
-| `todo register` | Register lines as tasks (`PATH --decisions FILE`, JSON result). |
-| `todo drift` | Report todo vs task drift (`PATH`, JSON; no writes). |
+| `intake` | Register tasks from a JSON item list (`--items FILE [--project ID] --tag NAME ...` [`--reference TEXT`]; JSON result). Exit 0 when `failed` is empty, 1 if any failures, 2 if required flags missing. |
+| `tags` | Summarize tasks by tag (`[--project ID] [--finished-since ISO] [--finished-until ISO]`; `--json` for JSON). Without `--json`, one line per tag: `<tag> open=<n> done=<n> finished=<bool>`. Time values without a timezone are UTC; unparseable values exit 2. |
 | `section` | Assign section ids from host rules (`--max` default 200). |
 | `adopt` | Adopt store completion flags into pipeline state. |
 | `finish-node` | Apply a job result to a task (`task_gid --result PATH --meta-digest DIGEST`). |
@@ -244,7 +283,8 @@ Only the modules and names below are public. Names not listed here, and any modu
 | `tasksmith.sections` | `SectionDef`, `SectionsConfig`, `classify_section`, `evaluate_classification`, `sections_config_from_mapping` |
 | `tasksmith.settings` | `Settings`, `set_settings`, `settings`, `settings_installed` |
 | `tasksmith.tick` | `AdoptResult`, `FinishNodeResult`, `RecoverResult`, `SectionAssignment`, `TickResult`, `adopt_completions`, `aggregate_metrics`, `assign_sections`, `finish_node`, `format_metrics_text`, `recover`, `tick` |
-| `tasksmith.todo` | `RegisterResult`, `candidates`, `find_drift`, `line_id`, `register` |
+| `tasksmith.tags` | `TagGroup`, `parse_tags`, `set_tags`, `summarize` |
+| `tasksmith.intake` | `IntakeResult`, `register_items` |
 | `tasksmith.transition` | `RollupResult`, `pipeline_status_comment`, `plan_parent_due`, `rollup_parent_due`, `rollup_parent_of_task`, `transition_task`, `validate_subtask_row` |
 | `tasksmith.file_channel` | `FileChannel` |
 
