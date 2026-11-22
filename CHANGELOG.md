@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.8.0 - 2026-11-22
+
+### Added
+
+- tasksmith: replace todo with tags, intake, and completed_at
+
 ## 0.7.2 - 2026-11-22
 
 ### Changed
