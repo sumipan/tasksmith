@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.8.1 - 2026-11-22
+
+### Changed
+
+- readme: align with tags, intake, and completed_at API
+
 ## 0.8.0 - 2026-11-22
 
 ### Added
