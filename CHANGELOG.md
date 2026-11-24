@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.9.0 - 2026-11-24
+
+### Added
+
+- intake: track source_id in intake-seen ledger
+
 ## 0.8.2 - 2026-11-24
 
 ### Added

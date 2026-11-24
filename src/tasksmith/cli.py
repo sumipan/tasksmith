@@ -14,7 +14,7 @@ from tasksmith.execution import GhdagExecutor, GhdagThinker, set_executor, set_t
 from tasksmith.external import new_external_body, parse_check_at
 from tasksmith.file_channel import FileChannel
 from tasksmith.human import record_human_reply, request_human
-from tasksmith.intake import register_items
+from tasksmith.intake import register_items, seen_ids, unseen
 from tasksmith.local import LocalTaskStore
 from tasksmith.reconcile import ReconcileResult, _load_sections_config, reconcile
 from tasksmith.runtime import set_human_channel, set_task_store, task_store
@@ -180,6 +180,7 @@ def main(argv: list[str] | None = None) -> int:
             "record-human-reply",
             "metrics",
             "intake",
+            "intake-seen",
             "tags",
             "external",
         ),
@@ -210,6 +211,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--items", default=None, help="JSON file of intake items (intake)")
     parser.add_argument("--reference", default=None, help="reference text for intake (intake)")
     parser.add_argument("--tag", action="append", default=None, help="tag name (intake; repeatable)")
+    parser.add_argument(
+        "--unseen",
+        action="append",
+        default=None,
+        dest="unseen_ids",
+        help="source ID to filter as not yet seen (intake-seen; repeatable)",
+    )
     parser.add_argument("--finished-since", dest="finished_since", default=None)
     parser.add_argument("--finished-until", dest="finished_until", default=None)
     parser.add_argument("--days", type=int, default=7)
@@ -267,6 +275,22 @@ def main(argv: list[str] | None = None) -> int:
             )
             print(json.dumps(asdict(result), ensure_ascii=False, indent=2 if args.json else None))
             return 0 if not result.failed else 1
+
+        if args.command == "intake-seen":
+            if args.unseen_ids:
+                ids = unseen(args.unseen_ids)
+                if args.json:
+                    print(json.dumps(ids, ensure_ascii=False))
+                else:
+                    for sid in ids:
+                        print(sid)
+            else:
+                count = len(seen_ids())
+                if args.json:
+                    print(json.dumps({"count": count}, ensure_ascii=False))
+                else:
+                    print(count)
+            return 0
 
         if args.command == "tags":
             from datetime import datetime, timezone
