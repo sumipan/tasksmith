@@ -119,3 +119,97 @@ def test_intake_and_tags_cli(tmp_path: Path) -> None:
     )
     assert empty.returncode == 0, empty.stderr
     assert json.loads(empty.stdout) == []
+
+
+def test_intake_seen_unseen_json(tmp_path: Path) -> None:
+    """Refs: #7906 AC6."""
+    root = tmp_path / "cli-root"
+    ledger = root / ".tasks" / "state" / "intake-seen.jsonl"
+    ledger.parent.mkdir(parents=True)
+    ledger.write_text(
+        json.dumps(
+            {
+                "source_id": "b",
+                "outcome": "not_registered",
+                "task_gid": None,
+                "at": "2026-01-01T00:00:00+00:00",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(WORKTREE / "src")
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "tasksmith",
+            "--root",
+            str(root),
+            "intake-seen",
+            "--unseen",
+            "a",
+            "--unseen",
+            "b",
+            "--json",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
+        cwd=WORKTREE,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads(proc.stdout) == ["a"]
+
+
+def test_intake_seen_count_outputs(tmp_path: Path) -> None:
+    """Refs: #7906 AC7."""
+    root = tmp_path / "cli-root"
+    ledger = root / ".tasks" / "state" / "intake-seen.jsonl"
+    ledger.parent.mkdir(parents=True)
+    rows = [
+        json.dumps(
+            {
+                "source_id": sid,
+                "outcome": "not_registered",
+                "task_gid": None,
+                "at": "2026-01-01T00:00:00+00:00",
+            }
+        )
+        for sid in ("one", "two")
+    ]
+    ledger.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(WORKTREE / "src")
+
+    plain = subprocess.run(
+        [sys.executable, "-m", "tasksmith", "--root", str(root), "intake-seen"],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
+        cwd=WORKTREE,
+    )
+    assert plain.returncode == 0, plain.stderr
+    assert plain.stdout.strip() == "2"
+
+    as_json = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "tasksmith",
+            "--root",
+            str(root),
+            "intake-seen",
+            "--json",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
+        cwd=WORKTREE,
+    )
+    assert as_json.returncode == 0, as_json.stderr
+    assert json.loads(as_json.stdout) == {"count": 2}
