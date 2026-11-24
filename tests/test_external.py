@@ -1,4 +1,4 @@
-"""External-owner probes and tick integration. Refs: issue #7536 AC1–AC9."""
+"""External-owner probes and tick integration. Refs: issue #7536 AC1–AC9, #7895 AC1–AC4."""
 
 from __future__ import annotations
 
@@ -12,11 +12,8 @@ from pathlib import Path
 import pytest
 
 from tasksmith.body import parse_meta_field, parse_sections, update_meta_field
-from tasksmith.external import (
-    ProbeResult,
-    format_check_at,
-    new_external_body,
-)
+from tasksmith.external import ProbeResult, format_check_at, new_external_body
+from tasksmith.language import language
 from tasksmith.model import OwnerType, PipelineState
 from tasksmith.reconcile import reconcile
 from tasksmith.runtime import set_human_channel, set_task_store
@@ -363,3 +360,125 @@ def test_missing_check_at_is_meta_invalid(external_env) -> None:
     assert parse_meta_field(sections, "check_at") is None
     rules = [v.rule_id for v in external_violations(sections)]
     assert rules == ["design_doc.external_meta_invalid"]
+
+
+def test_probe_done_notify_false_completes_without_human_notification(
+    external_env,
+) -> None:
+    """Refs: #7895 AC1."""
+    store, channel, tmp = external_env
+    title = "silent signal"
+
+    def silent_done(_task: dict, _params: dict[str, str]) -> ProbeResult:
+        return ProbeResult("done", "", notify=False)
+
+    set_settings(
+        Settings(
+            state_dir=tmp / "state",
+            project_id=None,
+            executor_exists=lambda _name: True,
+            request_channel_id="local",
+            timezone="UTC",
+            probes={"silent_done": silent_done},
+        )
+    )
+    body = _past_external(check="silent_done")
+    gid = store.create_task(title, body=body)
+    tick(now=datetime(2026, 11, 21, 12, 0, tzinfo=UTC))
+
+    sections = parse_sections(store.get_task(gid)["body"])
+    assert parse_meta_field(sections, "state") == PipelineState.DONE.value
+    assert channel.follow_ups == []
+    assert channel.announces == []
+    expected = language().messages["external.done"].format(name=title)
+    stories = store.get_task_stories(gid)
+    joined = "\n".join(str(s.get("text") or "") for s in stories)
+    assert expected in joined
+
+
+def test_probe_done_defaults_to_notification(external_env) -> None:
+    """Refs: #7895 AC2."""
+    store, channel, tmp = external_env
+
+    def say_x(_task: dict, _params: dict[str, str]) -> ProbeResult:
+        return ProbeResult("done", "x")
+
+    set_settings(
+        Settings(
+            state_dir=tmp / "state",
+            project_id=None,
+            executor_exists=lambda _name: True,
+            request_channel_id="local",
+            timezone="UTC",
+            probes={"say_x": say_x},
+        )
+    )
+    body = _past_external(check="say_x")
+    gid = store.create_task("announce x", body=body)
+    tick(now=datetime(2026, 11, 21, 12, 0, tzinfo=UTC))
+
+    assert parse_meta_field(parse_sections(store.get_task(gid)["body"]), "state") == (
+        PipelineState.DONE.value
+    )
+    assert channel.announces == ["x"]
+    assert channel.follow_ups == []
+
+
+def test_quiet_hours_runs_only_opted_in_external_probe(external_env) -> None:
+    """Refs: #7895 AC3."""
+    store, channel, tmp = external_env
+    calls: list[str] = []
+
+    def mark_done(_task: dict, params: dict[str, str]) -> ProbeResult:
+        calls.append(params.get("who", ""))
+        return ProbeResult("done", notify=False)
+
+    set_settings(
+        Settings(
+            state_dir=tmp / "state",
+            project_id=None,
+            executor_exists=lambda _name: True,
+            request_channel_id="local",
+            timezone="UTC",
+            quiet_hours=("22:00", "07:00"),
+            probes={"mark_done": mark_done},
+        )
+    )
+    when = datetime(2026, 11, 21, 23, 0, tzinfo=UTC)
+    body_default = _past_external(check="mark_done", check_at=when, params={"who": "default"})
+    body_quiet = new_external_body(
+        objective="quiet ok",
+        check="mark_done",
+        check_at=when,
+        check_every=60,
+        check_max=5,
+        params={"who": "quiet"},
+        check_in_quiet=True,
+    )
+    gid_default = store.create_task("default quiet", body=body_default)
+    gid_quiet = store.create_task("opt in", body=body_quiet)
+    before_default = store.get_task(gid_default)["body"]
+    before_quiet = store.get_task(gid_quiet)["body"]
+
+    tick(now=when)
+
+    assert calls == ["quiet"]
+    assert store.get_task(gid_default)["body"] == before_default
+    assert parse_meta_field(parse_sections(store.get_task(gid_quiet)["body"]), "state") == (
+        PipelineState.DONE.value
+    )
+    assert store.get_task(gid_quiet)["body"] != before_quiet
+    assert channel.announces == []
+    assert channel.follow_ups == []
+
+
+def test_new_external_body_writes_check_in_quiet_only_when_enabled(external_env) -> None:
+    """Refs: #7895 AC4."""
+    del external_env
+    when = datetime(2026, 11, 21, 10, 0, tzinfo=UTC)
+    omitted = new_external_body(objective="o", check="time", check_at=when)
+    enabled = new_external_body(
+        objective="o", check="time", check_at=when, check_in_quiet=True
+    )
+    assert parse_meta_field(parse_sections(omitted), "check_in_quiet") is None
+    assert parse_meta_field(parse_sections(enabled), "check_in_quiet") == "yes"

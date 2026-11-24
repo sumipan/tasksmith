@@ -387,6 +387,15 @@ def _meta_int(sections: dict[str, str], key: str, *, default: int = 0) -> int:
         return default
 
 
+def _external_check_in_quiet(body: str | None) -> bool:
+    if not isinstance(body, str):
+        return False
+    sections = parse_sections(body)
+    if sections is None:
+        return False
+    return parse_meta_field(sections, "check_in_quiet") == "yes"
+
+
 def _notify_external(name: str, text: str, report_to: str | None, messages: list[str]) -> None:
     from tasksmith.runtime import human_channel
 
@@ -428,9 +437,12 @@ def _run_external_probes(
         gated.append(node)
 
     if in_quiet:
-        if gated:
-            messages.append(language().messages["tick.skip_external_quiet"])
-        return
+        waiting_count = len(gated)
+        gated = [node for node in gated if _external_check_in_quiet(node.body)]
+        if not gated:
+            if waiting_count:
+                messages.append(language().messages["tick.skip_external_quiet"])
+            return
     if not dry_run and not channel_available:
         if gated:
             messages.append("skip external: human_channel not installed")
@@ -508,7 +520,8 @@ def _run_external_probes(
 
             if status == "done":
                 msg = report or texts["external.done"].format(name=node.name)
-                _notify_external(node.name, msg, report_to, messages)
+                if probe_result.notify:
+                    _notify_external(node.name, msg, report_to, messages)
                 transition_task(
                     node.task_gid,
                     state=PipelineState.DONE,
