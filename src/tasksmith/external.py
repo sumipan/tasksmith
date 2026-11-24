@@ -39,6 +39,7 @@ _WINDOW_RE = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)-([01]\d|2[0-3]):([0-5]\d)$"
 class ProbeResult:
     status: str  # done | continue | speak
     report: str = ""
+    notify: bool = True
 
 
 Probe = Callable[[dict[str, Any], dict[str, str]], ProbeResult]
@@ -234,6 +235,7 @@ def new_external_body(
     check_window: str | None = None,
     params: Mapping[str, str] | None = None,
     report_to: str | None = None,
+    check_in_quiet: bool = False,
 ) -> str:
     body = build_controlled_notes(
         objective=objective,
@@ -254,6 +256,8 @@ def new_external_body(
         )
     if report_to:
         body = update_meta_field(body, "report_to", report_to, create=True)
+    if check_in_quiet:
+        body = update_meta_field(body, "check_in_quiet", "yes", create=True)
     return body
 
 

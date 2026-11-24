@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.8.2 - 2026-11-24
+
+### Added
+
+- external: opt-in quiet checks and silent done probes
+
 ## 0.8.1 - 2026-11-22
 
 ### Changed
