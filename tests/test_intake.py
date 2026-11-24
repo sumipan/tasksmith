@@ -303,3 +303,20 @@ def test_register_items_rejects_non_string_source_id(tmp_path) -> None:
         store=store,
     )
     assert result.failed == [{"text": "bad", "error": "invalid source_id"}]
+
+
+def test_register_items_ignores_invalid_source_id_when_seen_is_disabled(tmp_path) -> None:
+    """``use_seen=False`` preserves legacy processing regardless of source_id."""
+    ledger = _install_state(tmp_path)
+    store = LocalTaskStore(tmp_path)
+    result = register_items(
+        [{"text": "legacy", "source_id": 1}],
+        project_id="p",
+        tags=["t"],
+        store=store,
+        seen_path=ledger,
+        use_seen=False,
+    )
+    assert len(result.created) == 1
+    assert result.failed == []
+    assert not ledger.exists()

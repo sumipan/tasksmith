@@ -407,8 +407,8 @@ def register_items(
     resolved_seen: Path | None = None
 
     for item in items:
-        sid = _source_id_value(item)
-        if sid is False:
+        sid = _source_id_value(item) if use_seen else None
+        if use_seen and sid is False:
             text = str(item.get("text", "")).strip() or str(item.get("text", ""))
             failed.append({"text": text, "error": "invalid source_id"})
             continue
