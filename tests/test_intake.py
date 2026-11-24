@@ -6,9 +6,11 @@ import json
 import threading
 from pathlib import Path
 
+import pytest
+
 from tasksmith import LocalTaskStore
 from tasksmith.body import parse_meta_field, parse_sections
-from tasksmith.intake import mark_seen, register_items, unseen
+from tasksmith.intake import mark_seen, register_items, seen_ids, unseen
 from tasksmith.settings import Settings, set_settings
 from tasksmith.store import TaskStoreError
 from tasksmith.tags import parse_tags
@@ -177,6 +179,30 @@ def test_mark_seen_and_unseen_are_idempotent_and_ordered(tmp_path) -> None:
     rows = _read_ledger(ledger)
     assert [row["source_id"] for row in rows] == ["b"]
     assert len(rows) == 1
+
+
+def test_seen_ids_rejects_invalid_record_schema(tmp_path) -> None:
+    ledger = _install_state(tmp_path)
+    ledger.parent.mkdir(parents=True)
+    invalid_rows = [
+        {"source_id": "a", "outcome": "created", "task_gid": None, "at": "2026-01-01T00:00:00+00:00"},
+        {"source_id": "a", "outcome": "duplicate", "task_gid": "1", "at": "2026-01-01T00:00:00+00:00"},
+        {"source_id": "a", "outcome": "not_registered", "task_gid": None, "at": "not-a-time"},
+        {"source_id": "a", "outcome": "not_registered", "task_gid": None, "at": "2026-01-01T00:00:00"},
+    ]
+    for row in invalid_rows:
+        ledger.write_text(json.dumps(row) + "\n", encoding="utf-8")
+        with pytest.raises(ValueError, match=r"line 1"):
+            seen_ids(ledger)
+
+
+def test_mark_seen_rejects_records_it_cannot_write_validly(tmp_path) -> None:
+    ledger = _install_state(tmp_path)
+    with pytest.raises(ValueError, match="created outcome"):
+        mark_seen(["a"], outcome="created", path=ledger)
+    with pytest.raises(ValueError, match="non-empty string"):
+        mark_seen([""], path=ledger)
+    assert not ledger.exists()
 
 
 def test_register_items_without_source_id_does_not_create_ledger(tmp_path) -> None:

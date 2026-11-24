@@ -9,7 +9,7 @@ import time
 from collections.abc import Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterator
 
@@ -84,6 +84,25 @@ def _parse_record_line(line: str, line_no: int) -> dict:
     source_id = raw["source_id"]
     if not isinstance(source_id, str) or not source_id:
         raise ValueError(f"intake-seen.jsonl line {line_no}: invalid source_id")
+    task_gid = raw["task_gid"]
+    if outcome == "created":
+        if not isinstance(task_gid, str) or not task_gid:
+            raise ValueError(
+                f"intake-seen.jsonl line {line_no}: created outcome requires task_gid"
+            )
+    elif task_gid is not None:
+        raise ValueError(
+            f"intake-seen.jsonl line {line_no}: {outcome} outcome requires null task_gid"
+        )
+    at = raw["at"]
+    if not isinstance(at, str):
+        raise ValueError(f"intake-seen.jsonl line {line_no}: invalid at")
+    try:
+        parsed_at = datetime.fromisoformat(at)
+    except ValueError as exc:
+        raise ValueError(f"intake-seen.jsonl line {line_no}: invalid at") from exc
+    if parsed_at.tzinfo is None or parsed_at.utcoffset() != timedelta(0):
+        raise ValueError(f"intake-seen.jsonl line {line_no}: at must be UTC timezone-aware")
     return raw
 
 
@@ -141,6 +160,11 @@ def mark_seen(
     """Append ledger records for source IDs that are not yet recorded."""
     if outcome not in _VALID_OUTCOMES:
         raise ValueError(f"unknown outcome: {outcome!r}")
+    if outcome == "created":
+        raise ValueError("mark_seen cannot record a created outcome without a task_gid")
+    for source_id in source_ids:
+        if not isinstance(source_id, str) or not source_id:
+            raise ValueError("source_id must be a non-empty string")
     seen_path = _resolve_seen_path(path)
     with _seen_lock(seen_path):
         known = _load_seen_ids(seen_path)
