@@ -19,7 +19,7 @@ _META_LI_RE = re.compile(r"<li>\s*([^<:]+):\s*([^<]*?)\s*</li>", re.I)
 _LIST_SECTIONS = ("deliverables", "acceptance")
 
 # ---------------------------------------------------------------------------
-# エスケープ・リンク化
+# Escape and linkify
 # ---------------------------------------------------------------------------
 
 
@@ -28,7 +28,7 @@ def escape_text(text: str) -> str:
     return html.escape(text or "", quote=False)
 
 
-# URL は ASCII のみ。日本語の地の文（「。」「）」など）が直後に続いても URL に含めない。
+# URLs are ASCII-only; trailing CJK punctuation must not be absorbed into the match.
 _URL_RE = re.compile(r"https?://[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]+")
 _URL_TRAILING_PUNCT = ".,;:!?'"
 _ANCHOR_RE = re.compile(r"<a\b([^>]*)>(.*?)</a\s*>", re.I | re.S)
@@ -36,7 +36,7 @@ _HREF_RE = re.compile(r"""\bhref\s*=\s*(?:"([^"]*)"|'([^']*)')""", re.I)
 
 
 def _trim_url(url: str) -> str:
-    """末尾の句読点と、対応の取れない閉じ括弧を URL から外す。"""
+    """Strip trailing punctuation and unmatched closing parens from a URL match."""
     while url:
         last = url[-1]
         if last in _URL_TRAILING_PUNCT:
@@ -49,9 +49,9 @@ def _trim_url(url: str) -> str:
 
 
 def linkify_text(text: str) -> str:
-    """plain text を escape し、URL だけ <a href> にする。
+    """Escape plain text and wrap URLs in ``<a href>``.
 
-    読み戻しは :func:`section_plain_text`（``<a>`` を URL 文字列に戻してから unescape）。
+    Round-trip via :func:`section_plain_text` (anchors become URL strings, then unescape).
     """
     src = text or ""
     out: list[str] = []
@@ -74,22 +74,22 @@ def _unwrap_anchor(m: re.Match[str]) -> str:
     if href_m is None:
         return inner
     href = href_m.group(1) if href_m.group(1) is not None else href_m.group(2)
-    # 外部 URL は表示文字列 = href。Asana のメンション（表示がタスク名等）は href を残す
+    # External URLs: visible text equals href; Asana mentions keep inner text.
     if html.unescape(re.sub(r"<[^>]+>", "", inner)).strip() == html.unescape(href).strip():
         return inner
     return href
 
 
 def section_plain_text(fragment: str | None) -> str:
-    """節の HTML 断片を plain text に戻す（``<a>`` は URL 文字列、それ以外の文字は unescape）。
+    """Convert a section HTML fragment to plain text (``<a>`` -> URL string, then unescape).
 
-    ``<a>`` 以外のタグ（``<ul>`` / ``<li>`` 等）は ``html.unescape`` と同じく触らない。
+    Tags other than ``<a>`` (``<ul>`` / ``<li>``, etc.) are left as in ``html.unescape``.
     """
     return html.unescape(_ANCHOR_RE.sub(_unwrap_anchor, fragment or ""))
 
 
 # ---------------------------------------------------------------------------
-# 旧い版（nexus-cp/v1 / v2 / v3）と tasksmith/v1 の HTML の節の読み書き
+# Legacy nexus-cp (v1/v2/v3) and tasksmith/v1 HTML section read/write
 # ---------------------------------------------------------------------------
 
 
@@ -174,7 +174,7 @@ def html_format_version(html_notes: str | None) -> str | None:
 
 
 def parse_html_meta_field(sections: dict[str, str], key: str) -> str | None:
-    """制御メタデータの ``<li>key: value</li>`` から value を取り出す。"""
+    """Extract value from control metadata ``<li>key: value</li>`` entries."""
     meta = sections.get("control") or ""
     for m in _META_LI_RE.finditer(meta):
         if m.group(1).strip() == key:
@@ -229,7 +229,7 @@ def _meta_to_text(fragment: str) -> str:
         text = " ".join(_inline_text(li).split())
         m = re.match(r"^([A-Za-z0-9_.-]+):\s*(.*)$", text)
         if not m:
-            continue  # 注意書きの行（版ごとに文言が違う）は捨てて、先頭の 1 行に揃える
+            continue  # Drop advisory lines (wording varies by pack); keep the leading tip only.
         key, value = m.group(1).strip(), m.group(2).strip()
         if key == "format":
             value = body_format.FORMAT_VERSION
@@ -275,7 +275,7 @@ def _meta_to_html(text: str) -> str:
 
 
 def _text_to_html(text: str, *, lists: bool) -> str:
-    """節のテキストを HTML の断片にする。``lists`` なら ``- `` の連続を ``<ul>`` にする。"""
+    """Convert section text to an HTML fragment; ``- `` runs become ``<ul>`` when ``lists`` is true."""
     pieces: list[tuple[str, str]] = []  # (kind, html)
     pending_text: list[str] = []
     pending_items: list[str] = []
@@ -335,9 +335,9 @@ def _text_to_html(text: str, *, lists: bool) -> str:
 
 
 def body_to_html(body: str) -> str:
-    """本文のテキスト（固定フォーマット）を Asana の ``html_notes`` にする。
+    """Convert a fixed-format plain body to Asana ``html_notes``.
 
-    ``<p>`` を含む、または 60,000 文字を超えるときは ``TaskStoreError``。
+    Raises ``TaskStoreError`` when the result contains ``<p>`` or exceeds 60,000 characters.
     """
     sections = body_format.parse_sections(body)
     if sections is None:
