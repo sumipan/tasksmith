@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.10.2 - 2026-11-27
+
+### Changed
+
+- readme: document Asana-backed TaskStore setup
+
 ## 0.10.1 - 2026-11-27
 
 ### Fixed
