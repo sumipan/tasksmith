@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import time
 from collections import defaultdict, deque
@@ -92,6 +93,7 @@ class ReconcileResult:
     adoptable_completions: list[ReconcileNode] = field(default_factory=list)
     adoptable_reopens: list[ReconcileNode] = field(default_factory=list)
     inverted_periods: list[ReconcileNode] = field(default_factory=list)
+    error: str | None = None
 
 
 def _project_gid(project_gid: str | None) -> str | None:
@@ -242,7 +244,10 @@ def _load_sections_config() -> Any:
     return settings().sections
 
 
-def _empty_reconcile(elapsed: float) -> ReconcileResult:
+def _empty_reconcile(elapsed: float, *, error: str | None = None) -> ReconcileResult:
+    warnings: list[str] = []
+    if error is not None:
+        warnings = [f"reconcile_failed: {error}"]
     return ReconcileResult(
         ready=[],
         waiting_human=[],
@@ -254,9 +259,10 @@ def _empty_reconcile(elapsed: float) -> ReconcileResult:
         elapsed_seconds=elapsed,
         review=[],
         completable_parents=[],
-        warnings=[],
+        warnings=warnings,
         unsectioned=[],
         section_unresolved=[],
+        error=error,
     )
 
 
@@ -686,7 +692,9 @@ def reconcile(
             adoptable_reopens=categorized["adoptable_reopens"],
             inverted_periods=inverted_periods,
         )
-    except Exception:
+    except Exception as exc:
+        diagnostic = f"{type(exc).__name__}: {exc}"
+        logging.getLogger(__name__).exception("reconcile failed")
         elapsed = time.perf_counter() - started
-        return _empty_reconcile(round(elapsed, 4))
+        return _empty_reconcile(round(elapsed, 4), error=diagnostic)
 
