@@ -218,6 +218,48 @@ Hosts also call `tasksmith.settings.set_settings(Settings(...))` — including `
 
 Task dicts from the store include `completed_at` (ISO 8601 UTC, or `None` when incomplete). `list_tasks` returns completed tasks as well.
 
+## Asana as a task store
+
+Use `AsanaTaskStore` when tasks should live in an Asana project instead of the bundled `LocalTaskStore`. Install tasksmith as usual, create Asana personal access tokens, then register the store before running the CLI or your host loop.
+
+```python
+import os
+
+from tasksmith.asana import AsanaTaskStore
+from tasksmith.runtime import set_task_store
+
+store = AsanaTaskStore(
+    writer_token=os.environ["ASANA_WRITER_TOKEN"],
+    reader_token=os.environ.get("ASANA_READER_TOKEN"),
+    project_gid=os.environ["ASANA_PROJECT_GID"],
+)
+set_task_store(store)
+```
+
+`AsanaTaskStore` accepts keyword-only arguments: `writer_token: str`, `reader_token: str | None = None`, `project_gid: str`, and `workspace_gid: str | None = None`. Omit `workspace_gid` when the default project is enough; the store resolves the workspace from the project on first use.
+
+- **`writer_token`** — token for the AI Asana account that creates tasks, updates bodies, posts comments, and syncs tags. The display name of this account is what `ai_actor_names()` returns, so tasksmith can tell AI-written changes apart from human edits in the body.
+- **`reader_token`** — optional token for a human-side account used only for reads. When omitted, `writer_token` is used for reads as well. Reader clients send only `GET` requests; non-GET calls on a reader client raise `AsanaConfigError`.
+- **`set_task_store(store)`** — after registration, `tasksmith.runtime.task_store()` returns this instance. tasksmith does not construct an `AsanaTaskStore` from environment variables automatically; the host supplies tokens and project id explicitly.
+
+### Body and tags on Asana
+
+Controlled `tasksmith/v1` bodies are stored in Asana `html_notes` (plain `notes` are used only for non-controlled text). Conversion uses `<body>`, `<h2>`, `<h3>`, `<ul>`, `<li>`, `<pre>`, and `<a>`; it does not emit `<p>`. If the converted HTML would exceed 60,000 characters, the store raises `TaskStoreError` before calling the API.
+
+`state:` and `owner:` in the task body are authoritative. Asana tags named `state:*` and `owner:*` are index tags for listing and filtering; they mirror control metadata but are not the source of truth. The `tags:` field in control metadata is synchronized as normal user tags on the task.
+
+### Free-plan limits and fallbacks
+
+Several Asana APIs return HTTP 402 on the free plan. tasksmith keeps pipeline semantics in the task body and store logic instead.
+
+| Asana capability | On the free plan | tasksmith replacement |
+|------------------|----------------|----------------------|
+| Custom fields | API may return HTTP 402 | Keep `state:`, `owner:`, and other fields in `tasksmith/v1` control metadata |
+| Task search | Search API may return HTTP 402 | List tasks in the project and match incomplete task names with a local case-insensitive substring filter |
+| Dependencies | Dependency API may return HTTP 402 | Store dependent task GIDs in `depends_on:`; tasksmith enforces readiness from the body |
+
+Search fallback also runs on some HTTP 400/403 responses in the implementation; for operators on the free plan, the important case is HTTP 402. Paid-only setup steps are not required in the README.
+
 ## On-disk layout
 
 Under `<root>/.tasks/`:
