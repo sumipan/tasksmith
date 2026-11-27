@@ -148,6 +148,8 @@ def _format_reconcile_text(result: ReconcileResult) -> str:
         f"waiting_human={len(result.waiting_human)} blocked={len(result.blocked)} "
         f"drift={len(result.drift)}"
     ]
+    if result.error is not None:
+        lines.append(f"error={result.error}")
     for node in result.ready:
         lines.append(f"  ready: {node.task_gid} {node.name!r}")
     return "\n".join(lines)
@@ -407,7 +409,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(json.dumps(result_to_dict(result), ensure_ascii=False, indent=2))
             else:
                 print(_format_reconcile_text(result))
-            return 0
+            return 1 if result.error is not None else 0
 
         if args.command == "section":
             rec = reconcile(args.project_gid)

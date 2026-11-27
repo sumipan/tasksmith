@@ -7,6 +7,10 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from unittest.mock import patch
+
+from tasksmith.cli import main
+from tasksmith.reconcile import ReconcileResult
 
 WORKTREE = Path(__file__).resolve().parents[1]
 
@@ -28,6 +32,44 @@ def test_reconcile_json_with_root(tmp_path: Path) -> None:
     payload = json.loads(proc.stdout)
     for key in ("ready", "waiting_human", "blocked", "drift"):
         assert key in payload
+    assert payload.get("error") is None
+
+
+def _failed_reconcile_result() -> ReconcileResult:
+    diagnostic = "RuntimeError: store unavailable"
+    return ReconcileResult(
+        ready=[],
+        waiting_human=[],
+        blocked=[],
+        drift=[],
+        overdue=[],
+        unmanaged=[],
+        elapsed_seconds=0.0,
+        error=diagnostic,
+        warnings=[f"reconcile_failed: {diagnostic}"],
+    )
+
+
+def test_reconcile_json_failure_outputs_error_and_returns_one(tmp_path: Path, capsys) -> None:
+    """Refs: #8110."""
+    root = tmp_path / "cli-root"
+    failed = _failed_reconcile_result()
+    with patch("tasksmith.cli.reconcile", return_value=failed):
+        code = main(["--root", str(root), "reconcile", "--json"])
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["error"] == "RuntimeError: store unavailable"
+
+
+def test_reconcile_text_failure_outputs_error_and_returns_one(tmp_path: Path, capsys) -> None:
+    """Refs: #8110."""
+    root = tmp_path / "cli-root"
+    failed = _failed_reconcile_result()
+    with patch("tasksmith.cli.reconcile", return_value=failed):
+        code = main(["--root", str(root), "reconcile"])
+    assert code == 1
+    out = capsys.readouterr().out
+    assert "error=RuntimeError: store unavailable" in out
 
 
 def test_intake_and_tags_cli(tmp_path: Path) -> None:

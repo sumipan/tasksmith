@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.10.1 - 2026-11-27
+
+### Fixed
+
+- reconcile: surface failure diagnostics when classify raises
+
 ## 0.10.0 - 2026-11-27
 
 ### Added

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import logging
+from unittest.mock import MagicMock
+
 import pytest
 
 from tasksmith import LocalTaskStore
@@ -84,3 +87,86 @@ def test_reconcile_detects_dependency_cycle(orchestration_env) -> None:
     assert r.ready == []
     blocked = {n.task_gid for n in r.blocked}
     assert gid_a in blocked and gid_b in blocked
+
+
+def test_reconcile_list_tasks_exception_returns_diagnostic_empty_result(
+    orchestration_env, monkeypatch
+) -> None:
+    """Refs: #8110."""
+    broken = MagicMock()
+    broken.list_tasks.side_effect = RuntimeError("store unavailable")
+    monkeypatch.setattr("tasksmith.reconcile.task_store", lambda: broken)
+
+    result = reconcile()
+
+    assert result.ready == []
+    assert result.blocked == []
+    assert result.error == "RuntimeError: store unavailable"
+    assert result.warnings == ["reconcile_failed: RuntimeError: store unavailable"]
+
+
+def test_reconcile_missing_waiting_external_message_returns_key_error(
+    orchestration_env,
+) -> None:
+    """Refs: #8110."""
+    from tasksmith.language import LanguagePack, set_language
+    from tasksmith.language_en import EN
+
+    messages = {k: v for k, v in EN.messages.items() if k != "reconcile.waiting_external"}
+    set_language(
+        LanguagePack(
+            headings=EN.headings,
+            original_notes_heading=EN.original_notes_heading,
+            meta_tip=EN.meta_tip,
+            messages=messages,
+            violations=EN.violations,
+            word_lists=EN.word_lists,
+            prompts=EN.prompts,
+        )
+    )
+    try:
+        store = orchestration_env
+        store.create_task(
+            "ext",
+            body=build_controlled_notes(
+                objective="Wait",
+                owner=OwnerType.EXTERNAL,
+                state=PipelineState.READY,
+                flow="dag",
+                acceptance=["Done"],
+            ),
+        )
+
+        result = reconcile()
+
+        assert result.error == "KeyError: 'reconcile.waiting_external'"
+        assert result.warnings == [
+            "reconcile_failed: KeyError: 'reconcile.waiting_external'"
+        ]
+    finally:
+        set_language(None)
+
+
+def test_reconcile_success_has_no_failure_diagnostic(orchestration_env) -> None:
+    """Refs: #8110."""
+    store = orchestration_env
+    store.create_task("solo", body=_ready_human_body("solo"))
+
+    result = reconcile()
+
+    assert result.error is None
+    assert not any(w.startswith("reconcile_failed") for w in result.warnings)
+
+
+def test_reconcile_exception_logs_traceback(orchestration_env, monkeypatch, caplog) -> None:
+    """Refs: #8110."""
+    broken = MagicMock()
+    broken.list_tasks.side_effect = RuntimeError("store unavailable")
+    monkeypatch.setattr("tasksmith.reconcile.task_store", lambda: broken)
+
+    with caplog.at_level(logging.ERROR, logger="tasksmith.reconcile"):
+        reconcile()
+
+    errors = [r for r in caplog.records if r.levelno == logging.ERROR]
+    assert len(errors) == 1
+    assert errors[0].exc_info is not None
