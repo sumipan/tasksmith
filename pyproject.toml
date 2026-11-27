@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tasksmith"
-version = "0.9.0"
+version = "0.10.0"
 description = "A coordinator that moves work forward when humans and AI agents are nodes in the same task DAG"
 readme = "README.md"
 license = "MIT"

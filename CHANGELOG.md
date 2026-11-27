@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.10.0 - 2026-11-27
+
+### Added
+
+- asana: add Asana-backed TaskStore package for OSS consumers
+
+### Fixed
+
+- repair: replace CJK comments in asana html module (#8119)
+
 ## 0.9.0 - 2026-11-24
 
 ### Added
