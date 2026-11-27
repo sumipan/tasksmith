@@ -50,9 +50,7 @@ class AsanaClient:
         body: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         if self._role == "reader" and method.upper() != "GET":
-            raise AsanaConfigError(
-                f"reader client rejects non-GET method {method.upper()!r}"
-            )
+            raise AsanaConfigError(f"reader client rejects non-GET method {method.upper()!r}")
         url = f"{BASE}{path}"
         if query:
             url = f"{url}?{query}"
@@ -72,15 +70,27 @@ class AsanaClient:
         timeout_backoff = _INITIAL_BACKOFF_SEC
         is_get = method.upper() == "GET"
         while True:
-            req = urllib.request.Request(
-                url, data=data_bytes, method=method.upper(), headers=headers
-            )
+            req = urllib.request.Request(url, data=data_bytes, method=method.upper(), headers=headers)
             try:
                 with urllib.request.urlopen(req, timeout=60) as res:
                     raw = res.read().decode("utf-8")
                     if not raw.strip():
                         return {}
-                    return json.loads(raw)
+                    try:
+                        payload = json.loads(raw)
+                    except json.JSONDecodeError as e:
+                        raise AsanaAPIError(
+                            "Asana API response is not valid JSON",
+                            status_code=None,
+                            body=raw,
+                        ) from e
+                    if not isinstance(payload, dict):
+                        raise AsanaAPIError(
+                            "Asana API response is not a JSON object",
+                            status_code=None,
+                            body=raw,
+                        )
+                    return payload
             except urllib.error.HTTPError as e:
                 err_body = e.read().decode("utf-8", errors="replace")
                 if e.code in _RETRY_STATUSES and attempt < _MAX_RETRIES:

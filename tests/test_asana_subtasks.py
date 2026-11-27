@@ -12,15 +12,14 @@ def _row(gid: str, completed: bool = False, due_on: str | None = None) -> dict:
 def test_subtask_order_and_moves_are_stable() -> None:
     """Issue #8119: due-date ordering and minimal move plan."""
     rows = [
-        _row("d", completed=True, due_on="2026-09-18"),
+        _row("d", completed=True),
         _row("b", due_on="2026-09-20"),
         _row("c"),
         _row("a", due_on="2026-09-18"),
+        _row("e", completed=True, due_on="2026-01-01"),
     ]
     target = plan_order(rows)
-    assert target == ("a", "b", "c", "d")
+    assert target == ("a", "b", "c", "d", "e")
 
-    current = ("d", "b", "c", "a")
-    moves = plan_moves(current, target)
-    assert moves
-    assert all(isinstance(m, SubtaskMove) for m in moves)
+    moves = plan_moves(("a", "b", "c"), ("b", "c", "a"))
+    assert moves == (SubtaskMove(gid="a", insert_before=None, insert_after="c"),)

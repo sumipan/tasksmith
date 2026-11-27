@@ -69,3 +69,14 @@ def test_client_retries_only_get_timeouts() -> None:
     ):
         client.request_json("POST", "/tasks", body={"name": "n"})
     assert m_open.call_count == 1
+
+
+@pytest.mark.parametrize("payload", [b"[]", b"not-json"])
+def test_client_rejects_non_object_json(payload: bytes) -> None:
+    """Issue #8119: malformed and non-object JSON responses use AsanaAPIError."""
+    client = AsanaClient("token", role="reader")
+    with (
+        patch("urllib.request.urlopen", return_value=_ok_ctx(payload)),
+        pytest.raises(AsanaAPIError),
+    ):
+        client.request_json("GET", "/tasks/1")
